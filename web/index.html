@@ -1,0 +1,573 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Telemetria Coach</title>
+<style>
+:root{
+  --bg:#0a0d12; --panel:#121720; --panel2:#171d28; --line:#232b39; --text:#e7ebf2; --muted:#8792a5;
+  --green:#2fd27a; --red:#ff5468; --amber:#ffb238; --blue:#4fa6ff; --violet:#b48cff;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font:15px/1.35 "Segoe UI",system-ui,sans-serif;overflow:hidden}
+.mono{font-family:"Cascadia Mono",Consolas,monospace;font-variant-numeric:tabular-nums}
+.app{display:grid;grid-template-rows:auto 1fr auto;height:100vh;gap:10px;padding:10px}
+header{display:grid;grid-template-columns:1.2fr 1fr 1fr 1.1fr;gap:10px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 14px;min-width:0;min-height:0}
+.label{color:var(--muted);font-size:11px;letter-spacing:.08em;text-transform:uppercase;margin-bottom:4px;display:flex;justify-content:space-between;gap:8px}
+.big{font-size:34px;font-weight:600}
+.huge{font-size:58px;font-weight:700;line-height:1}
+.sub{color:var(--muted);font-size:13px}
+.pill{display:inline-block;padding:2px 8px;border-radius:99px;background:var(--panel2);border:1px solid var(--line);font-size:12px;margin-right:4px}
+.pill.on{border-color:var(--amber);color:var(--amber)}
+.good{color:var(--green)} .bad{color:var(--red)} .warn{color:var(--amber)} .info{color:var(--blue)}
+main{display:grid;grid-template-columns:1.05fr 2.65fr;gap:10px;min-height:0}
+.view{display:grid;grid-template-columns:1.5fr 1.15fr;gap:10px;min-height:0}
+.view[hidden]{display:none}
+.tab{border-radius:8px} .tab.active{border-color:var(--blue);color:var(--blue)}
+tr.me td{background:rgba(79,166,255,.14);font-weight:600}
+tr.near td{background:rgba(255,255,255,.04)}
+.duel{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.duel>div{background:var(--panel2);border-radius:8px;padding:10px}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;font-size:14px}
+.kv span:nth-child(odd){color:var(--muted)}
+.plan{margin-top:8px;padding:8px 10px;border-radius:8px;background:var(--panel2);border-left:4px solid var(--green);font-size:15px}
+.plan.save{border-color:var(--amber)} .plan.pit{border-color:var(--red)}
+.spot{position:fixed;top:0;bottom:0;width:26px;display:none;z-index:8;pointer-events:none}
+.spot.on{display:block;animation:pulse .5s ease-in-out infinite alternate}
+#spotL{left:0;background:linear-gradient(90deg,var(--red),transparent)}
+#spotR{right:0;background:linear-gradient(270deg,var(--red),transparent)}
+@keyframes pulse{from{opacity:.55}to{opacity:1}}
+#next.brakenow{background:#5a0f1a;border-color:var(--red)}
+#next.brakenow #nid::after{content:"  FREIE!";color:var(--red);font-weight:800}
+.liftcue{margin-top:6px;padding:4px 8px;border-radius:6px;background:rgba(255,178,56,.15);color:var(--amber);font-weight:600;display:none}
+#modal{position:fixed;inset:0;background:rgba(0,0,0,.7);display:none;align-items:center;justify-content:center;z-index:10}
+#modal>div{max-width:760px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px;max-height:85vh;overflow:auto}
+#modal a{color:var(--blue)} #modal li{margin-bottom:8px}
+.col{display:flex;flex-direction:column;gap:10px;min-height:0}
+.grow{flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:column}
+.scroll{overflow:auto;min-height:0}
+#feed{display:flex;flex-direction:column;gap:6px;overflow:auto}
+.msg{padding:9px 12px;border-radius:8px;background:var(--panel2);border-left:4px solid var(--blue);font-size:17px}
+.msg.new{animation:in .3s ease}
+.msg.good{border-color:var(--green);color:var(--text)} .msg.warn{border-color:var(--amber);color:var(--text)} .msg.bad{border-color:var(--red);color:var(--text)}
+.msg .age{color:var(--muted);font-size:11px;float:right;margin-left:8px}
+.msg.old{opacity:.5}
+@keyframes in{from{transform:translateX(-12px);opacity:0}to{transform:none;opacity:1}}
+#next .row{display:flex;align-items:baseline;gap:14px}
+.bar{height:14px;background:var(--panel2);border-radius:7px;overflow:hidden;margin-top:8px}
+.bar>div{height:100%;background:linear-gradient(90deg,var(--green),var(--amber),var(--red));transition:width .07s linear}
+canvas{width:100%;display:block}
+.tyres{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.tyre{background:var(--panel2);border-radius:8px;padding:8px;border-top:4px solid var(--muted)}
+.tyre .p{font-size:22px;font-weight:600}
+.imo{display:flex;gap:3px;margin-top:4px}
+.imo span{flex:1;text-align:center;font-size:11px;border-radius:4px;padding:2px 0;color:#0a0d12;font-weight:600}
+.tip{padding:8px 10px;background:var(--panel2);border-radius:8px;margin-bottom:6px;border-left:4px solid var(--blue)}
+.tip.p1{border-color:var(--red)} .tip.p2{border-color:var(--amber)}
+.tip b{display:block;margin-bottom:2px} .tip .area{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.06em}
+.tip .ev{color:var(--muted);font-size:12px;margin-top:2px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+td,th{padding:4px 6px;text-align:left;border-bottom:1px solid var(--line)}
+th{color:var(--muted);font-weight:500;font-size:11px;text-transform:uppercase}
+.bal{display:grid;grid-template-columns:auto 1fr 1fr;gap:4px 8px;align-items:center;font-size:13px}
+.bal .cell{background:var(--panel2);border-radius:6px;padding:4px 8px;text-align:center}
+footer{display:flex;gap:8px;align-items:center;color:var(--muted);font-size:12px}
+button{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:6px 12px;font:inherit;cursor:pointer}
+button:hover{border-color:var(--blue)} button.on{border-color:var(--green);color:var(--green)}
+#offline{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(10,13,18,.92);flex-direction:column;gap:10px;font-size:20px;z-index:9}
+.legend span{margin-left:10px} .dot{display:inline-block;width:10px;height:3px;vertical-align:middle;margin-right:4px}
+@media (max-width:1100px){html,body{overflow:auto}.app{height:auto}main,header,.view{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="card">
+      <div class="label"><span id="sim">—</span><span id="aids"></span></div>
+      <div style="font-size:20px;font-weight:600" id="car">Aguardando simulador…</div>
+      <div class="sub" id="track"></div>
+    </div>
+    <div class="card">
+      <div class="label"><span>Volta <b id="lapno" class="mono">–</b></span><span id="valid"></span></div>
+      <div class="big mono" id="cur">--:--.---</div>
+      <div class="sub mono">Prevista <span id="pred">–</span> · Ideal <span id="ideal" class="good">–</span></div>
+    </div>
+    <div class="card">
+      <div class="label"><span>Última / Melhor</span><span id="fuel" class="mono"></span></div>
+      <div class="mono" style="font-size:22px"><span id="last">--:--.---</span></div>
+      <div class="mono good" style="font-size:22px" id="best">--:--.---</div>
+    </div>
+    <div class="card" style="display:flex;flex-direction:column;justify-content:center;align-items:flex-end">
+      <div class="label" style="width:100%"><span>Delta vs referência</span><span id="where"></span></div>
+      <div class="huge mono" id="delta">±0.000</div>
+    </div>
+  </header>
+
+  <main>
+    <div class="col">
+      <div class="card" id="next">
+        <div class="label"><span>Próxima curva</span><span id="nextlast"></span></div>
+        <div class="row"><span class="big" id="nid">—</span><span class="sub" id="ninfo">Complete uma volta para mapear as curvas</span></div>
+        <div class="bar"><div id="nbar" style="width:0%"></div></div>
+        <div class="sub mono" id="ndist" style="margin-top:4px"></div>
+        <div class="liftcue" id="nlift">⛽ LIFT &amp; COAST: tire o pé antes da placa</div>
+      </div>
+      <div class="card grow">
+        <div class="label"><span>Coach ao vivo</span><span id="clock"></span></div>
+        <div id="feed"></div>
+      </div>
+    </div>
+
+    <div class="view" id="viewA">
+    <div class="col">
+      <div class="card">
+        <div class="label"><span>Velocidade na volta</span><span class="legend"><span><i class="dot" style="background:var(--violet)"></i>referência</span><span><i class="dot" style="background:var(--blue)"></i>atual</span></span></div>
+        <canvas id="cSpeed" height="230"></canvas>
+      </div>
+      <div class="card">
+        <div class="label"><span>Pedais e volante (10 s)</span><span class="mono" id="speedNow"></span></div>
+        <canvas id="cInputs" height="150"></canvas>
+      </div>
+      <div class="card grow">
+        <div class="label"><span>Equilíbrio estimado</span><span>+ subesterço / − sobresterço</span></div>
+        <div class="bal" id="bal"></div>
+        <div class="label" style="margin-top:12px"><span>Onde focar (perda média por curva)</span></div>
+        <div class="scroll"><table id="focus"></table></div>
+      </div>
+    </div>
+
+    <div class="col">
+      <div class="card">
+        <div class="label"><span>Pneus (pressão quente · temp. núcleo)</span><span id="psiTarget" class="mono"></span></div>
+        <div class="tyres" id="tyres"></div>
+      </div>
+      <div class="card grow">
+        <div class="label"><span>Dicas de setup e pilotagem</span><span id="tipcount"></span></div>
+        <div class="scroll" id="tips"><div class="sub">As dicas aparecem depois de algumas voltas com pneus quentes.</div></div>
+      </div>
+      <div class="card" style="max-height:30vh;display:flex;flex-direction:column">
+        <div class="label"><span>Voltas</span></div>
+        <div class="scroll"><table id="laps"></table></div>
+      </div>
+    </div>
+    </div>
+
+    <div class="view" id="viewR" hidden>
+      <div class="col">
+        <div class="card">
+          <div class="label"><span>Mapa ao vivo</span><span id="mapInfo"></span></div>
+          <canvas id="cMap" height="300"></canvas>
+        </div>
+        <div class="card grow">
+          <div class="label"><span>Classificação ao vivo</span><span id="rstatus"></span></div>
+          <div class="scroll"><table id="standings"></table></div>
+        </div>
+      </div>
+      <div class="col">
+        <div class="card">
+          <div class="label"><span>Duelo</span><span>gap · ritmo do rival vs você</span></div>
+          <div class="duel"><div id="dAhead"></div><div id="dBehind"></div></div>
+        </div>
+        <div class="card">
+          <div class="label"><span>Combustível e estratégia</span><span id="stMode"></span></div>
+          <div class="kv" id="stKv"></div>
+          <div class="plan" id="stPlan">—</div>
+        </div>
+        <div class="card grow">
+          <div class="label"><span>Pit stop</span><span id="pitLoss"></span></div>
+          <div id="pitBox" class="sub">Projeção aparece quando houver dados dos rivais.</div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    <button class="tab active" id="tabA">📈 Análise</button>
+    <button class="tab" id="tabR">🏁 Corrida</button>
+    <span style="width:12px"></span>
+    <button id="btnVoice">🔈 Voz desligada</button>
+    <button id="btnBeep">🔕 Bipes de frenagem</button>
+    <button id="btnFs">⛶ Tela cheia</button>
+    <button id="btnRef">Apagar referência</button>
+    <button id="btnSrc">📚 Conceitos e fontes</button>
+    <button id="btnQuit">✕ Fechar</button>
+    <span id="conn" style="margin-left:auto">conectando…</span>
+  </footer>
+</div>
+<div class="spot" id="spotL"></div><div class="spot" id="spotR"></div>
+<div id="modal"><div>
+  <h2 style="margin-top:0">Conceitos usados pelo coach</h2>
+  <ul>
+    <li><b>Fases da curva:</b> frenagem → trail braking → transição de pedais → acelerador equilibrado (~10–20%, só mantém a velocidade) → aceleração crescente → acelerador total.
+      <br><a href="https://driver61.com/uni/corner-phases/" target="_blank">Driver61 — The 6 Phases of a Corner</a></li>
+    <li><b>Rolar entre o freio e o acelerador é normal:</b> uma pausa curta deixa o carro girar. Grampos: ~meio carro; curvas rápidas: alguns carros. Rolar entre o acelerador e o freio (tirar o pé antes de frear) só em casos especiais.
+      O coach só reclama quando a rolagem passa da folga para o tipo de curva <i>e</i> é maior que na sua melhor volta.
+      <br><a href="https://blayze.io/blog/car-racing/coasting-on-the-track" target="_blank">Blayze — Is Coasting Bad? (Dion von Moltke)</a></li>
+    <li><b>Erro mais comum:</b> acelerar entre o turn-in e o ápice, antes de poder abrir o volante, e depois ter que aliviar. Se o carro parece lento antes do ápice, normalmente você freou demais na entrada.
+      <br><a href="https://nasaspeed.news/columns/driver-instruction/reapplying-the-throttle-at-the-right-time/" target="_blank">NASA Speed News — Reapplying the throttle at the right time</a></li>
+    <li><b>Trail braking:</b> manter um pouco de freio enquanto o carro entra na curva, soltando até o ápice — aproxima a frenagem do ápice e permite acelerar antes na saída.
+      <br><a href="https://www.mazdamotorsports.com/2020/03/17/driving-tip-3-trail-braking/" target="_blank">Mazda Motorsports — Trail Braking</a></li>
+    <li><b>Lift &amp; coast (economia):</b> tirar o pé antes do ponto de frenagem no fim das retas, rolar e frear, mantendo a mesma velocidade de ápice. O coach só sugere quando o combustível não fecha até o fim.
+      <br><a href="https://coachdaveacademy.com/tutorials/mastering-lift-and-coast-how-to-save-fuel-without-sacrificing-speed/" target="_blank">Coach Dave Academy — Mastering Lift and Coast</a> ·
+      <a href="https://racer.com/racerpedia/racing-101/how-does-fuel-saving-work" target="_blank">RACER — How does fuel saving work?</a></li>
+  </ul>
+  <p class="sub">Os limites numéricos (folga de rolagem, margens de combustível) ficam em <code>CFG</code> no topo de analysis.py.</p>
+  <button onclick="document.getElementById('modal').style.display='none'">Fechar</button>
+</div></div>
+<div id="offline"><div>⏳ Aguardando o ACC / Assetto Corsa…</div><div class="sub">Entre na pista (sessão ao vivo). O painel conecta sozinho.</div></div>
+
+<script>
+const $ = id => document.getElementById(id);
+let feedSig = '';
+// O painel atualiza 15x/s: só mexe no DOM quando o conteúdo realmente muda (evita piscar e trava de hover/scroll).
+(() => {
+  const d = Object.getOwnPropertyDescriptor(Element.prototype, 'innerHTML');
+  Object.defineProperty(Element.prototype, 'innerHTML', { configurable: true, get() { return d.get.call(this); },
+    set(v) { if (this.__html !== v) { this.__html = v; d.set.call(this, v); } } });
+})();
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+let ref = {version:-1, speed:[]}, refVersion = -1, state = null;
+const hist = [];
+let voice = false, lastSpoken = 0, pageStart = Date.now()/1000;
+try { voice = localStorage.getItem('voice') === '1'; } catch(e) {}
+
+function setVoiceBtn(){ $('btnVoice').textContent = voice ? '🔊 Voz ligada' : '🔈 Voz desligada'; $('btnVoice').classList.toggle('on', voice); }
+setVoiceBtn();
+$('btnVoice').onclick = () => { voice = !voice; try{localStorage.setItem('voice', voice?'1':'0')}catch(e){}; setVoiceBtn();
+  if (voice) speak('Coach de voz ligado'); };
+$('btnFs').onclick = () => document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
+$('btnQuit').onclick = () => { if (confirm('Fechar o Telemetria Coach?')) fetch('/api/quit', {method:'POST'}).finally(() => window.close()); };
+// bipes de frenagem: 3 toques curtos a 100 m, 50 m e um longo no ponto de frenagem da referência
+let beeps = false, actx = null, beepState = {id: null, stage: 0};
+try { beeps = localStorage.getItem('beeps') === '1'; } catch(e) {}
+function setBeepBtn(){ $('btnBeep').textContent = beeps ? '🔔 Bipes de frenagem' : '🔕 Bipes de frenagem'; $('btnBeep').classList.toggle('on', beeps); }
+setBeepBtn();
+function tone(freq, ms){
+  try { actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+    const o = actx.createOscillator(), g = actx.createGain(); o.frequency.value = freq; o.type = 'square';
+    g.gain.value = 0.08; o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime + ms/1000); } catch(e) {}
+}
+$('btnBeep').onclick = () => { beeps = !beeps; try{localStorage.setItem('beeps', beeps?'1':'0')}catch(e){}; setBeepBtn(); if (beeps) tone(880, 120); };
+function brakeCue(n){
+  if (!n || !n.braking) { beepState = {id: null, stage: 0}; $('next').classList.remove('brakenow'); return; }
+  if (beepState.id !== n.id) beepState = {id: n.id, stage: 0};
+  const marks = [100, 50, 0];
+  while (beepState.stage < 3 && n.dist <= marks[beepState.stage] + (beepState.stage === 2 ? 8 : 0)) {
+    if (beeps) beepState.stage === 2 ? tone(1320, 260) : tone(880, 70);
+    beepState.stage++;
+  }
+  $('next').classList.toggle('brakenow', n.dist <= 12);
+}
+
+$('btnSrc').onclick = () => { $('modal').style.display = 'flex'; };
+let view = 'A', userPickedView = false;
+function setView(v, byUser){ view = v; if (byUser) userPickedView = true;
+  $('viewA').hidden = v !== 'A'; $('viewR').hidden = v !== 'R';
+  $('tabA').classList.toggle('active', v === 'A'); $('tabR').classList.toggle('active', v === 'R'); }
+$('tabA').onclick = () => setView('A', true);
+$('tabR').onclick = () => setView('R', true);
+
+const fmtGap = g => g == null ? '–' : (g > 0 ? '+' : g < 0 ? '−' : '') + Math.abs(g).toFixed(1);
+function duelBox(d, label, ahead){
+  if (!d) return `<div class="sub">${label}</div><div class="big">—</div>`;
+  let trend = '';
+  if (d.pace_diff != null) {
+    // pace_diff = ritmo do rival − o seu (s/volta). Positivo = rival mais lento.
+    const yours = ahead ? d.pace_diff > 0 : d.pace_diff > 0;
+    const cls = yours ? 'good' : 'bad';
+    trend = `<div class="${cls}">${d.pace_diff > 0 ? 'rival ' + d.pace_diff.toFixed(2) + 's/v mais lento' : 'rival ' + (-d.pace_diff).toFixed(2) + 's/v mais rápido'}</div>`;
+    if (ahead && d.pace_diff > 0.05 && d.gap) trend += `<div class="sub">alcança em ~${Math.ceil(d.gap / d.pace_diff)} voltas</div>`;
+    if (!ahead && d.pace_diff < -0.05 && d.gap) trend += `<div class="sub">chega em você em ~${Math.ceil(d.gap / -d.pace_diff)} voltas</div>`;
+  }
+  return `<div class="sub">${label} · P${d.pos}${d.pit ? ' · <span class="warn">BOX</span>' : ''}</div>
+    <div style="font-size:18px;font-weight:600">#${d.num} ${d.name}</div>
+    <div class="big mono">${d.gap != null ? d.gap.toFixed(1) + 's' : '–'}</div>${trend}<div class="sub mono">última ${d.last}</div>`;
+}
+
+function renderRace(s){
+  const r = s.race || {}, st = s.strategy || {};
+  if (s.is_race && !userPickedView && view !== 'R') setView('R');
+  $('rstatus').textContent = r.status || '';
+  if (!r.available) {
+    $('standings').innerHTML = `<tr><td class="sub">${r.status || 'Sem dados de rivais.'}</td></tr>`;
+  } else {
+    const rows = r.rows || [];
+    const meIdx = rows.findIndex(x => x.me);
+    $('standings').innerHTML = '<tr><th>P</th><th>#</th><th>Piloto</th><th>Gap você</th><th>Δ líder</th><th>Última</th><th>Melhor</th><th>Ritmo</th><th>Pit</th></tr>' +
+      rows.map((x, i) => `<tr class="${x.me ? 'me' : Math.abs(i - meIdx) === 1 ? 'near' : ''}">
+        <td>${x.pos || '–'}</td><td class="mono">${x.num}</td><td>${x.name}</td>
+        <td class="mono">${x.me ? '' : fmtGap(x.gap_me)}</td>
+        <td class="mono sub">${x.laps_down ? '+' + x.laps_down + 'V' : x.gap_leader ? x.gap_leader.toFixed(1) : ''}</td>
+        <td class="mono">${x.last}</td><td class="mono sub">${x.best}</td>
+        <td class="mono ${x.pace_diff == null ? '' : x.pace_diff > 0 ? 'good' : 'bad'}">${x.pace_diff == null ? '' : (x.pace_diff > 0 ? '+' : '') + x.pace_diff.toFixed(2)}</td>
+        <td>${x.pit ? '<span class="warn">BOX</span>' : ''}${x.pits ? ' ' + x.pits + '×' : ''}</td></tr>`).join('');
+  }
+  $('dAhead').innerHTML = duelBox(r.ahead, 'À frente', true);
+  $('dBehind').innerHTML = duelBox(r.behind, 'Atrás', false);
+  // estratégia
+  const kv = [['Combustível', st.fuel_now != null ? st.fuel_now + ' L' : '–'], ['Consumo', st.per_lap ? st.per_lap + ' L/volta' : 'medindo…'],
+    ['Ritmo médio', st.pace ? st.pace.toFixed(3) + ' s' : '–'], ['Tempo restante', st.time_left || '–'],
+    ['Voltas até o fim', st.laps_to_go != null ? '~' + st.laps_to_go : '–'], ['Precisa até o fim', st.need != null ? st.need + ' L' : '–'],
+    ['Saldo', st.balance != null ? (st.balance >= 0 ? '+' : '') + st.balance + ' L' : '–']];
+  if (st.mode === 'save') kv.push(['Meta de consumo', st.target + ' L/volta']);
+  if (st.add) kv.push(['Colocar no pit', st.add + ' L' + (st.mfd_fuel != null ? ` (MFD: ${st.mfd_fuel} L)` : '')]);
+  if (st.pit_missing) kv.push(['Pit obrigatório', '<span class="warn">pendente</span>']);
+  $('stKv').innerHTML = kv.map(([k, v]) => `<span>${k}</span><span class="mono">${v}</span>`).join('');
+  $('stPlan').className = 'plan ' + (st.mode || '');
+  $('stPlan').textContent = st.plan || '—';
+  $('stMode').innerHTML = st.mode === 'save' ? '<span class="warn">MODO ECONOMIA</span>' : st.mode === 'pit' ? '<span class="bad">PIT NECESSÁRIO</span>' : '';
+  $('pitLoss').textContent = `perda ${st.pit_loss}s ${st.pit_loss_measured ? '(medida)' : '(estimada até você parar uma vez)'}`;
+  const rj = r.rejoin;
+  $('pitBox').innerHTML = rj ? `<div style="font-size:18px">Se parar <b>agora</b>: volta em <b class="big">P${rj.pos}</b></div>
+      ${rj.ahead ? `<div>${rj.ahead.gap.toFixed(1)}s atrás de <b>#${rj.ahead.num} ${rj.ahead.name}</b></div>` : '<div class="good">na frente de todos</div>'}
+      ${rj.behind ? `<div>${rj.behind.gap.toFixed(1)}s à frente de <b>#${rj.behind.num} ${rj.behind.name}</b>${rj.behind.gap < 2 ? ' <span class="warn">— vai sair no meio do pelotão</span>' : ''}</div>` : ''}
+      <div class="sub" style="margin-top:6px">Não inclui o tempo de abastecimento até a primeira parada ser medida. Undercut: parar antes do rival e usar os pneus novos na volta de saída; overcut: ficar fora e acelerar enquanto ele está na volta de saída.</div>`
+    : `<div class="sub">${r.available ? 'Aguardando gaps dos rivais…' : r.status || ''}</div>`;
+}
+
+$('btnRef').onclick =() => { if (confirm('Apagar a volta de referência deste carro/pista?')) fetch('/api/clear_ref', {method:'POST'}); };
+
+function speak(text, urgent){
+  if (!('speechSynthesis' in window)) return;
+  if (urgent || speechSynthesis.pending) speechSynthesis.cancel();
+  // deixa números legíveis em voz: 1:24.633 -> "1 24 ponto 6"; +0.35s -> "mais 0 ponto 35"
+  const spoken = text.replace(/—/g, ',').replace(/✓/g, '').replace(/\bT(\d+)/g, 'curva $1')
+    .replace(/(\d+):(\d{2})\.(\d)\d*/g, '$1 $2 ponto $3')
+    .replace(/\+(\d+)\.(\d+)s/g, 'mais $1 ponto $2').replace(/[−-](\d+)\.(\d+)s/g, 'menos $1 ponto $2')
+    .replace(/(\d+)\.(\d+)s/g, '$1 ponto $2 segundos').replace(/\((.*?)\)/g, ', $1,');
+  const u = new SpeechSynthesisUtterance(spoken);
+  u.lang = 'pt-BR'; u.rate = 1.15;
+  const v = speechSynthesis.getVoices().find(v => v.lang && v.lang.toLowerCase().startsWith('pt'));
+  if (v) u.voice = v;
+  speechSynthesis.speak(u);
+}
+
+function fitCanvas(c){
+  const r = c.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+  const h = parseInt(c.getAttribute('height'));
+  if (c.width !== Math.round(r.width*dpr)) { c.width = Math.round(r.width*dpr); c.height = Math.round(h*dpr); c.style.height = h+'px'; }
+  const ctx = c.getContext('2d'); ctx.setTransform(dpr,0,0,dpr,0,0);
+  return [ctx, r.width, h];
+}
+
+function drawSpeed(){
+  const [ctx, W, H] = fitCanvas($('cSpeed'));
+  ctx.clearRect(0,0,W,H);
+  const cur = state && state.cur_trace || [];
+  const all = ref.speed.concat(cur.filter(v => v != null));
+  const max = Math.max(100, ...all) * 1.05, pad = 18;
+  const y = v => H - pad - (v/max)*(H - pad - 6);
+  ctx.strokeStyle = css('--line'); ctx.lineWidth = 1; ctx.fillStyle = css('--muted'); ctx.font = '10px Segoe UI';
+  for (let v = 50; v < max; v += 50) { ctx.beginPath(); ctx.moveTo(0,y(v)); ctx.lineTo(W,y(v)); ctx.stroke(); ctx.fillText(v, 2, y(v)-2); }
+  // curvas
+  (state && state.corners || []).forEach(c => {
+    const x0 = c.start*W, x1 = c.end*W;
+    ctx.fillStyle = 'rgba(255,255,255,0.035)'; ctx.fillRect(x0, 0, x1-x0, H-pad);
+    ctx.fillStyle = css('--muted'); ctx.fillText('T'+c.id, c.apex*W - 6, H-4);
+  });
+  const line = (arr, color, w) => {
+    if (!arr.length) return;
+    ctx.strokeStyle = color; ctx.lineWidth = w; ctx.beginPath(); let pen = false;
+    arr.forEach((v,i) => { if (v == null) { pen = false; return; } const x = i/(arr.length-1)*W;
+      pen ? ctx.lineTo(x, y(v)) : ctx.moveTo(x, y(v)); pen = true; });
+    ctx.stroke();
+  };
+  line(ref.speed, css('--violet'), 1.5);
+  line(cur, css('--blue'), 2);
+  if (state && state.live) { const x = state.live.pos*W; ctx.strokeStyle = css('--text'); ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H-pad); ctx.stroke(); }
+}
+
+function drawInputs(){
+  const [ctx, W, H] = fitCanvas($('cInputs'));
+  ctx.clearRect(0,0,W,H);
+  ctx.strokeStyle = css('--line'); ctx.beginPath(); ctx.moveTo(0,H/2); ctx.lineTo(W,H/2); ctx.stroke();
+  const n = 150;
+  const draw = (key, color, f) => { ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.beginPath();
+    hist.forEach((s,i) => { const x = (i + n - hist.length)/(n-1)*W, yy = f(s[key]); i ? ctx.lineTo(x,yy) : ctx.moveTo(x,yy); }); ctx.stroke(); };
+  draw('gas', css('--green'), v => H - 4 - v*(H-8));
+  draw('brake', css('--red'), v => H - 4 - v*(H-8));
+  draw('steer', css('--amber'), v => H/2 - v*(H/2-4));
+  // marca eventos de ABS/TC
+  hist.forEach((s,i) => { const x = (i + n - hist.length)/(n-1)*W;
+    if (s.abs_on) { ctx.fillStyle = css('--red'); ctx.fillRect(x, 0, 2, 5); }
+    if (s.tc_on) { ctx.fillStyle = css('--amber'); ctx.fillRect(x, 6, 2, 5); } });
+}
+
+function colorTemp(v, [lo, hi]){
+  if (!v) return css('--muted');
+  if (v < lo) return css('--blue'); if (v > hi) return css('--red'); return css('--green');
+}
+const tyreNames = ['Dianteiro E','Dianteiro D','Traseiro E','Traseiro D'];
+
+function render(s){
+  state = s;
+  $('offline').style.display = s.connected ? 'none' : 'flex';
+  $('conn').textContent = s.connected ? '● conectado' : '○ sem telemetria';
+  $('conn').style.color = s.connected ? css('--green') : css('--muted');
+  $('spotL').classList.toggle('on', (s.spot || '').includes('L'));
+  $('spotR').classList.toggle('on', (s.spot || '').includes('R'));
+  const mv = s.race && s.race.map_version;
+  if (mv != null && mv !== mapVersion) { mapVersion = mv; fetch('/api/map').then(r => r.json()).then(r => { mapPts = r.pts || []; }); }
+  if (s.ref_version !== refVersion) { refVersion = s.ref_version; fetch('/api/ref').then(r => r.json()).then(r => { ref = r; }); }
+  renderFeed(s.messages || []);
+  try { renderRace(s); } catch(e) { console.error(e); }
+  if (!s.live) return;
+  const L = s.live;
+  $('sim').textContent = (s.sim || '').toUpperCase() + (L.in_pit ? ' · BOX' : '');
+  $('car').textContent = s.car; $('track').textContent = s.track + (s.track_len ? ` · ${(s.track_len/1000).toFixed(2)} km` : '');
+  $('aids').innerHTML = `<span class="pill ${L.tc_on?'on':''}">TC ${L.tc||'–'}</span><span class="pill ${L.abs_on?'on':''}">ABS ${L.abs||'–'}</span>` + (L.bias ? `<span class="pill">BB ${L.bias}</span>` : '');
+  $('lapno').textContent = L.lap; $('cur').textContent = L.cur; $('last').textContent = L.last; $('best').textContent = L.best;
+  $('pred').textContent = L.predicted || '–';
+  $('ideal').textContent = L.ideal || '–';
+  $('valid').innerHTML = L.valid ? '<span class="good">válida</span>' : '<span class="bad">INVÁLIDA</span>';
+  $('fuel').textContent = `⛽ ${L.fuel} L` + (L.fuel_laps ? ` · ${L.fuel_laps} v` : '');
+  $('where').textContent = L.where || '';
+  const d = $('delta');
+  if (L.delta == null) { d.textContent = s.provisional || !s.corners.length ? 'sem ref.' : '±0.000'; d.style.color = css('--muted'); }
+  else { d.textContent = (L.delta > 0 ? '+' : L.delta < 0 ? '−' : '±') + Math.abs(L.delta).toFixed(3); d.style.color = L.delta > 0.02 ? css('--red') : L.delta < -0.02 ? css('--green') : css('--text'); }
+  $('speedNow').textContent = `${L.speed} km/h · ${L.gear <= 0 ? (L.gear < 0 ? 'R' : 'N') : L.gear + 'ª'}`;
+
+  hist.push({gas:L.gas, brake:L.brake, steer:L.steer, abs_on:L.abs_on, tc_on:L.tc_on});
+  while (hist.length > 150) hist.shift();
+
+  // próxima curva
+  const n = s.next;
+  if (n) {
+    $('nid').textContent = 'T' + n.id;
+    $('ninfo').innerHTML = `ref: mín <b>${n.ref_min}</b> km/h · ${n.ref_gear}ª · saída ${n.ref_exit} km/h`;
+    const pct = Math.max(0, Math.min(100, 100 - n.dist/450*100));
+    $('nbar').style.width = pct + '%';
+    $('ndist').textContent = n.braking ? `frenagem da referência em ${n.dist} m` : `entrada (sem frenagem na ref) em ${n.dist} m`;
+    $('nextlast').innerHTML = n.last ? `última passagem: <span class="${n.last.dt > 0.03 ? 'bad' : n.last.dt < -0.03 ? 'good' : ''}">${n.last.dt > 0 ? '+' : ''}${n.last.dt.toFixed(2)}s</span>` : '';
+    $('nlift').style.display = n.lift ? 'block' : 'none';
+    const lb = n.last_brake;
+    let extra = n.ref_peak ? ` · freio ref ${n.ref_peak}%` : '';
+    if (lb) extra += ` · última frenagem: <span class="${Math.abs(lb.d_m) > 10 ? 'warn' : 'good'}">${Math.abs(lb.d_m) <= 5 ? 'no ponto' : Math.abs(lb.d_m) + ' m ' + (lb.d_m > 0 ? 'cedo' : 'tarde')}</span>, pico ${lb.peak}%`;
+    $('ninfo').innerHTML += extra;
+    brakeCue(n);
+  } else if (s.corners && s.corners.length) {
+    $('nlift').style.display = 'none';
+    brakeCue(null);
+    $('nid').textContent = L.where || '—'; $('ninfo').textContent = L.where ? 'na curva' : 'reta'; $('nbar').style.width = '0%'; $('ndist').textContent = ''; $('nextlast').textContent = '';
+  }
+
+  // pneus
+  const pt = s.psi_target, ct = s.core_target;
+  $('psiTarget').textContent = `alvo ${pt[0]}–${pt[1]} psi`;
+  $('tyres').innerHTML = s.tyres.map((t,i) => {
+    const pc = colorTemp(t.p, pt), tc = colorTemp(t.core, ct);
+    const imo = s.has_imo ? `<div class="imo">${[t.i,t.m,t.o].map(v => `<span style="background:${colorTemp(v, ct)}">${v}</span>`).join('')}</div>` : '';
+    return `<div class="tyre" style="border-top-color:${tc}"><div class="sub">${tyreNames[i]}</div>
+      <div class="p mono" style="color:${pc}">${t.p.toFixed(1)} <span class="sub">psi</span></div>
+      <div class="mono" style="color:${tc}">${t.core.toFixed(0)}°C <span class="sub">· freio ${t.brake}°C</span></div>${imo}</div>`;
+  }).join('');
+
+  // dicas
+  $('tipcount').textContent = s.setup.length ? s.setup.length + ' itens' : '';
+  if (s.setup.length) $('tips').innerHTML = s.setup.map(t => `<div class="tip p${t.prio}"><span class="area">${t.area}</span><b>${t.title}</b>${t.text}${t.evidence ? `<div class="ev">${t.evidence}</div>` : ''}</div>`).join('');
+
+  // equilíbrio
+  const B = s.balance || {};
+  const cell = k => { const v = B[k]; if (v == null) return '<div class="cell sub">—</div>';
+    const cls = v > 0.12 ? 'warn' : v < -0.08 ? 'bad' : 'good', txt = v > 0.12 ? 'subesterço' : v < -0.08 ? 'sobresterço' : 'neutro';
+    return `<div class="cell ${cls}">${txt} <span class="mono sub">${v > 0 ? '+' : ''}${v.toFixed(2)}</span></div>`; };
+  $('bal').innerHTML = '<div></div><div class="sub" style="text-align:center">curvas lentas</div><div class="sub" style="text-align:center">curvas rápidas</div>' +
+    [['entrada','Entrada'],['meio','Meio'],['saida','Saída']].map(([k,l]) => `<div class="sub">${l}</div>${cell(k+'_lenta')}${cell(k+'_rapida')}`).join('');
+
+  // foco
+  $('focus').innerHTML = s.focus.length ? '<tr><th>Curva</th><th>Perda média</th><th>Motivo principal (última)</th></tr>' + s.focus.map(f =>
+    `<tr><td><b>T${f.id}</b></td><td class="mono ${f.avg > 0.05 ? 'bad' : f.avg < -0.02 ? 'good' : ''}">${f.avg > 0 ? '+' : ''}${f.avg.toFixed(2)}s</td><td>${f.last && f.last.reasons.length ? f.last.reasons[0] : '<span class="sub">ok</span>'}</td></tr>`).join('')
+    : '<tr><td class="sub">Precisa de uma referência + 2 voltas.</td></tr>';
+
+  // voltas
+  $('laps').innerHTML = '<tr><th>#</th><th>Tempo</th><th>Δ melhor</th><th>Setores</th><th>⛽</th><th>Trav.</th></tr>' + s.laps.map(l =>
+    `<tr><td>${l.n}</td><td class="mono ${l.valid ? '' : 'bad'}">${l.time}${l.valid ? '' : ' ✗'}</td><td class="mono ${l.delta_best > 0 ? '' : 'good'}">${l.delta_best ? (l.delta_best > 0 ? '+' : '') + (l.delta_best/1000).toFixed(3) : '–'}</td>
+     <td class="mono sub">${(l.sectors||[]).map(x => (x/1000).toFixed(1)).join(' · ')}</td><td class="mono">${l.fuel || ''}</td><td>${l.locks || ''}</td></tr>`).join('');
+}
+
+let shownIds = new Set();
+function renderFeed(msgs){
+  const now = Date.now()/1000;
+  const list = msgs.filter(m => m.cat !== 'spotter').reverse().slice(0, 9);
+  // só reconstrói a lista quando chega mensagem nova (senão a animação repete e pisca)
+  const sig = list.map(m => m.id).join(',');
+  if (sig !== feedSig) {
+    const prev = new Set(feedSig.split(','));
+    feedSig = sig;
+    $('feed').innerHTML = list.map(m => `<div class="msg ${m.level} ${prev.has(String(m.id)) ? '' : 'new'}" data-t="${m.t}"><span class="age"></span>${m.text}</div>`).join('');
+  }
+  $('feed').querySelectorAll('.msg').forEach(el => {
+    const age = now - parseFloat(el.dataset.t);
+    el.querySelector('.age').textContent = Math.round(age) + 's';
+    el.classList.toggle('old', age > 20);
+  });
+  msgs.forEach(m => {
+    if (shownIds.has(m.id)) return; shownIds.add(m.id);
+    if (!voice || !m.speak || m.t <= pageStart || m.t <= lastSpoken) return;
+    if (m.cat === 'spotter') { if (now - m.t < 1.5) { lastSpoken = m.t; speak(m.text, true); } return; }  // spotter fura a fila
+    if ((['warn','bad','good'].includes(m.level) || m.cat === 'volta') && now - m.t < 5) { lastSpoken = m.t; speak(m.text); }
+  });
+}
+
+// setInterval em vez de requestAnimationFrame: rAF pausa quando o navegador acha que a janela está oculta
+// mede o próprio fps e manda para o log do app (diagnóstico de travamento)
+let pf = {n: 0, gap: 0, last: performance.now(), since: performance.now()};
+// mapa: traçado montado pelas posições dos carros (salvo por pista) + carros ao vivo
+let mapVersion = -1, mapPts = [];
+function drawMap(){
+  const [ctx, W, H] = fitCanvas($('cMap'));
+  ctx.clearRect(0, 0, W, H);
+  const r = state && state.race || {};
+  const pts = mapPts.filter(p => p);
+  const cars = r.cars_xy || [];
+  const all = pts.length > 20 ? pts : pts.concat(cars.map(c => [c.x, c.y]));
+  if (!all.length) { ctx.fillStyle = css('--muted'); ctx.font = '13px Segoe UI'; ctx.fillText(r.available ? 'O mapa se monta sozinho conforme os carros andam.' : (r.status || ''), 10, 24); return; }
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  all.forEach(([x, y]) => { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); });
+  const pad = 16, k = Math.min((W - 2*pad) / Math.max(1, x1 - x0), (H - 2*pad) / Math.max(1, y1 - y0));
+  const ox = (W - (x1 - x0) * k) / 2, oy = (H - (y1 - y0) * k) / 2;
+  const P = (x, y) => [r.mirror ? W - (ox + (x - x0) * k) : ox + (x - x0) * k, oy + (y - y0) * k];
+  // traçado
+  ctx.strokeStyle = css('--line'); ctx.lineWidth = 9; ctx.lineJoin = 'round'; ctx.beginPath();
+  let pen = false;
+  mapPts.forEach(p => { if (!p) { pen = false; return; } const [a, b] = P(p[0], p[1]); pen ? ctx.lineTo(a, b) : ctx.moveTo(a, b); pen = true; });
+  if (mapPts[0] && mapPts[mapPts.length - 1]) { const [a, b] = P(mapPts[0][0], mapPts[0][1]); ctx.lineTo(a, b); }
+  ctx.stroke();
+  if (mapPts[0]) { const [a, b] = P(mapPts[0][0], mapPts[0][1]); ctx.fillStyle = css('--text'); ctx.fillRect(a - 1, b - 7, 3, 14); }
+  // carros (você por último, por cima)
+  ctx.font = '10px Segoe UI'; ctx.textAlign = 'center';
+  cars.slice().sort((a, b) => a.me - b.me).forEach(c => {
+    const [a, b] = P(c.x, c.y);
+    ctx.globalAlpha = c.pit ? 0.35 : 1;
+    ctx.fillStyle = c.me ? css('--blue') : c.near ? css('--amber') : '#c9d1dd';
+    ctx.beginPath(); ctx.arc(a, b, c.me ? 8 : 6, 0, 6.3); ctx.fill();
+    ctx.fillStyle = c.me ? css('--blue') : css('--muted');
+    ctx.fillText(c.me ? 'VOCÊ' : c.pos, a, b - 10);
+    ctx.globalAlpha = 1;
+  });
+  ctx.textAlign = 'start';
+  $('mapInfo').textContent = pts.length < mapPts.length * 0.9 ? `montando traçado… ${Math.round(pts.length / Math.max(1, mapPts.length) * 100)}%` : '';
+}
+
+function loop(){
+  const t = performance.now(); pf.n++; pf.gap = Math.max(pf.gap, t - pf.last); pf.last = t;
+  if (t - pf.since > 10000) {
+    fetch('/api/perf', {method:'POST', body: JSON.stringify({fps: Math.round(pf.n / ((t - pf.since)/1000)), gap: Math.round(pf.gap)})}).catch(() => {});
+    pf = {n: 0, gap: 0, last: t, since: t};
+  }
+  try { if (view === 'A') { drawSpeed(); drawInputs(); } else drawMap(); } catch(e) { console.error(e); }
+  $('clock').textContent = new Date().toLocaleTimeString('pt-BR');
+}
+setInterval(loop, 1000/20);
+
+function connect(){
+  const es = new EventSource('/stream');
+  es.onmessage = e => { try { render(JSON.parse(e.data)); } catch(err) { console.error(err); } };
+  es.onerror = () => { $('conn').textContent = '○ servidor offline — reconectando'; };
+}
+connect();
+</script>
+</body>
+</html>

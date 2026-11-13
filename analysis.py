@@ -61,6 +61,24 @@ CFG = {
     "pit_loss_s": 25.0,                   # perda estimada no pit até medir de verdade
     "fuel_margin_laps": 1.0,              # margem de segurança de combustível
     "fuel_save_max_pct": 0.06,            # até 6% de déficit: dá para economizar sem parar
+    # Desgaste de pneus (pela queda de ritmo dentro do stint)
+    "fuel_s_per_l": 0.03,                 # cada litro a mais deixa a volta ~0,03 s mais lenta (GT3, estimativa)
+    "deg_min_laps": 4,                    # voltas limpas no stint antes de estimar o desgaste
+    "tyre_change_extra_s": 8.0,           # tempo a mais no pit para trocar pneus quando já vai parar
+    # Clima (ACC): pneus de chuva compensam a partir de pista "úmida" com chuva ou "molhada"
+    "wet_min_minutes": 3.0,               # menos que isso até o fim: não vale parar para trocar
+}
+
+RAIN_TXT = ["seco", "garoa", "chuva fraca", "chuva média", "chuva forte", "tempestade"]
+GRIP_TXT = ["verde", "rápida", "ótima", "escorregadia", "úmida", "molhada", "alagada"]
+HABITS = {
+    "long_coasts": ("rolagem longa entre freio e acelerador",
+                    "solte o freio mais perto do ápice (trail braking) e retome o acelerador parcial assim que o carro apontar"),
+    "early_gas": ("acelerou cedo e teve que aliviar",
+                  "espere o ponto em que dá para começar a abrir o volante e aí acelere progressivo"),
+    "locks": ("travamentos de roda", "pise forte no início da frenagem e vá soltando; se travar sempre, leve o brake bias para trás"),
+    "spins": ("patinou na saída", "acelerador mais progressivo na saída ou +1 de TC"),
+    "entry_lifts": ("tirou o pé antes de frear", "acelere até a placa e freie de uma vez"),
 }
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dados")
@@ -222,6 +240,8 @@ class Lap:
         self.brake = [None] * n
         self.gear = [None] * n
         self.steer = [None] * n
+        self.x = [None] * n
+        self.y = [None] * n
         self.valid = True
         self.pit = False
         self.fuel_start = fuel
@@ -240,6 +260,8 @@ class Lap:
         self.brake[b] = f["brake"]
         self.gear[b] = f["gear"]
         self.steer[b] = f["steer"]
+        if f["x"] is not None:
+            self.x[b], self.y[b] = f["x"], f["y"]
         if f["abs_active"]:
             self.abs_bins.add(b)
         if f["tc_active"]:
@@ -262,6 +284,9 @@ class Lap:
             if a is None:
                 return None
             arrays[k] = a
+        # posição: opcional (nem todo jogo/sessão informa); só guarda se cobriu quase a volta toda
+        if sum(v is not None for v in self.x) > self.n * 0.8:
+            arrays["x"], arrays["y"] = _fill(self.x), _fill(self.y)
         return arrays
 
     def count(self, kind, b0, b1):
@@ -388,6 +413,18 @@ class Engine:
         self.spot = ""
         self.spot_clear_t = 0.0
         self.map_saved_version = -1
+        self.stint = 1
+        self.stint_wet = None
+        self.weather = None
+        self.weather_mode = None
+        self.weather_fc = (-1, -1)
+        self.deg_mode = None
+        self.traces = deque(maxlen=40)       # voltas desta sessão para comparar (amostradas)
+        self.seg_hist = {}                   # apex(fração) -> tempos do trecho de curva (voltas válidas)
+        self.reason_hist = {}                # apex -> {motivo: [contagem, texto]}
+        self.report = []
+        self.report_said_laps = 0
+        self.was_in_pit = False
         self.session_started = time.strftime("%Y%m%d_%H%M%S")
         if f:
             self._load_ref()
@@ -487,7 +524,9 @@ class Engine:
         path = os.path.join(DATA_DIR, "sessoes", f"{self.session_started}__{self.key()}.json")
         with open(path, "w", encoding="utf-8") as fh:
             json.dump({"sim": self.sim, "car": self.car, "track": self.track, "laps": self.laps,
-                       "setup": self.setup_tips}, fh, ensure_ascii=False, indent=1)
+                       "setup": self.setup_tips, "started": self.session_started,
+                       "corners": self._corner_summary(), "report": self.session_report()},
+                      fh, ensure_ascii=False, indent=1)
 
     def _set_ref(self, arrays, provisional, announce=True):
         self.ref = arrays
@@ -559,9 +598,14 @@ class Engine:
             self.prev_bin = b
             self._opponent_events(f)
             self._spotter(f)
+            self._weather(f)
+            if f["in_pit"] and not self.was_in_pit:
+                self._pit_report()
+            self.was_in_pit = f["in_pit"]
             if time.time() - self.setup_at > 2.0:
                 self.setup_at = time.time()
                 self.setup_tips = self._setup_advice()
+                self.report = self.session_report()
 
     def _green_pace(self):
         green = [l["ms"] for l in self.laps[-6:] if l["complete"] and l["valid"] and not l.get("pit")]
@@ -596,9 +640,17 @@ class Engine:
                    "long_coasts": sum(1 for _, k in lap.events if k == "long_coast"),
                    "early_gas": sum(1 for _, k in lap.events if k == "early_gas"),
                    "entry_lifts": sum(1 for _, k in lap.events if k == "entry_lift"),
-                   "coast_s": round(lap.coast_s, 1), "sectors": sectors if len(sectors) > 1 else []}
+                   "coast_s": round(lap.coast_s, 1), "sectors": sectors if len(sectors) > 1 else [],
+                   "stint": self.stint, "fuel_start": round(lap.fuel_start or 0, 2),
+                   "rain": f["rain_now"], "grip": f["grip_status"], "wet": f["rain_tyres"],
+                   "wear": round(sum(f["wear"]) / 4, 2) if f["wear"] else None,
+                   "pad": round(min(f["pad"]), 2) if f["pad"] else None}
             pace_before = self._green_pace()
             self.laps.append(rec)
+            if complete:
+                self.traces.append({"n": rec["n"], "ms": ms, "valid": lap.valid, "pit": lap.pit,
+                                    "corner_dt": dict(lap.corner_dt), **self._trace_arrays(arrays)})
+            self._stint_boundary(f, lap)
             self._measure_pit_loss(pace_before)
             if complete and not lap.pit:
                 arrays["ms"] = ms
@@ -617,6 +669,7 @@ class Engine:
             except OSError:
                 pass
             self._race_lap_messages(f)
+            self._tyre_messages(f)
             self._save_map()
         self._start_lap(f, b)
 
@@ -872,6 +925,14 @@ class Engine:
             reasons.append((1, f"referência usou {c.ref_gear}ª, você {g}ª"))
         reasons.sort(key=lambda r: -r[0])
         top = [r[1] for r in reasons[:2]]
+        sk = self._seg_key(c)
+        if lap.valid and not lap.pit:
+            self.seg_hist.setdefault(sk, []).append(lap.t[c.end] - lap.t[c.start])
+        if top and dt >= 0.05:
+            tag = re.sub(r"[-+]?\d+[\d.,]*", "#", top[0].split(" — ")[0])
+            rh = self.reason_hist.setdefault(sk, {})
+            cnt = rh.get(tag, [0, ""])
+            rh[tag] = [cnt[0] + 1, top[0]]
         c.history.append(dt)
         lap.corner_dt[c.id] = dt
         if lap.valid:
@@ -914,6 +975,334 @@ class Engine:
                 if bt > 0:
                     cur = self.brake_hot[k]
                     self.brake_hot[k] = bt if cur is None else cur + (bt - cur) * 0.02
+
+
+    # ------------------------------------------------------------ pneus: stint e desgaste
+    def _stint_boundary(self, f, lap):
+        """Novo stint depois de uma volta com box, troca seco/chuva ou pneu "zerado" (AC)."""
+        new = lap.pit and not (len(self.laps) >= 2 and self.laps[-2].get("pit"))  # entrada + saída do box = 1 parada
+        if self.stint_wet is not None and f["rain_tyres"] != self.stint_wet:
+            new = True
+        prev = [l for l in self.laps[:-1] if l.get("stint") == self.stint and l.get("wear")]
+        if f["wear"] and prev and sum(f["wear"]) / 4 > prev[-1]["wear"] + 2:
+            new = True
+        self.stint_wet = f["rain_tyres"]
+        if new:
+            self.stint += 1
+            self.deg_mode = None
+
+    def _tyre_deg(self, f, strat):
+        st = [l for l in self.laps if l.get("stint") == self.stint]
+        out = {"stint": self.stint, "age": len(st), "deg": None, "wear": None, "wear_rate": None,
+               "pad": f["pad"][:] if f["pad"] else None, "pad_rate": None, "mode": None, "text": ""}
+        if f["wear"]:
+            out["wear"] = [round(x, 1) for x in f["wear"]]
+            w = [l["wear"] for l in st if l.get("wear")]
+            if len(w) >= 2:
+                out["wear_rate"] = round((w[0] - w[-1]) / (len(w) - 1), 2)
+        pads = [l["pad"] for l in self.laps if l.get("pad")]
+        if len(pads) >= 3:
+            out["pad_rate"] = round((pads[0] - pads[-1]) / (len(pads) - 1), 3)
+        green = [(i, l) for i, l in enumerate(st) if l["complete"] and not l.get("pit")]
+        if f["grip_status"] >= 0:
+            # chuva/pista secando mudam o ritmo: só compara voltas na mesma condição de pista
+            bucket = lambda g: 0 if g is None or g <= 2 else min(g, 5)
+            same = [(i, l) for i, l in green if bucket(l.get("grip")) == bucket(f["grip_status"])]
+            if len(same) < len(green) and len(same) < CFG["deg_min_laps"]:
+                out["text"] = "Pista mudando (chuva/secando): medindo o desgaste de novo nesta condição."
+                return out
+            green = same
+        if len(green) < CFG["deg_min_laps"]:
+            out["text"] = f"Medindo o desgaste: {len(green)}/{CFG['deg_min_laps']} voltas limpas neste stint."
+            return out
+        med = statistics.median(l["ms"] for _, l in green) / 1000
+        pts = [(i, l["ms"] / 1000 - CFG["fuel_s_per_l"] * l.get("fuel_start", 0))
+               for i, l in green if l["ms"] / 1000 < med * 1.02]  # tira voltas com erro grande
+        if len(pts) < CFG["deg_min_laps"]:
+            out["text"] = "Voltas muito irregulares neste stint para medir o desgaste."
+            return out
+        mx = sum(x for x, _ in pts) / len(pts)
+        my = sum(y for _, y in pts) / len(pts)
+        var = sum((x - mx) ** 2 for x, _ in pts)
+        slope = sum((x - mx) * (y - my) for x, y in pts) / var if var else 0.0
+        resid = [y - (my + slope * (x - mx)) for x, y in pts[-2:]]
+        out["deg"] = round(slope, 3)
+        age = out["age"]
+        out["lost"] = round(max(0.0, slope) * age, 2)
+        laps_to_go = strat.get("laps_to_go")
+        stopping = strat.get("mode") == "pit" or f["pit_missing"]
+        cliff = slope > 0 and min(resid) > 0.35
+        if slope < 0.03:
+            out["text"] = f"Pneus estáveis: {slope:+.2f}s/volta (já descontado o combustível)."
+            out["mode"] = "ok"
+        elif not laps_to_go:
+            out["text"] = f"Perdendo ~{slope:.2f}s/volta por desgaste ({out['lost']:.1f}s desde os pneus novos)."
+            out["mode"] = "deg"
+        else:
+            gain = slope * age * laps_to_go  # pneus novos x continuar com estes até o fim
+            out["gain_new"] = round(gain, 1)
+            loss = self.pit_loss or CFG["pit_loss_s"]
+            if stopping:
+                if gain > CFG["tyre_change_extra_s"]:
+                    out["text"] = (f"Na parada, TROQUE os pneus: ganha ~{gain:.0f}s até o fim "
+                                   f"(custa ~{CFG['tyre_change_extra_s']:.0f}s a mais no box).")
+                    out["mode"] = "change"
+                else:
+                    out["text"] = f"Na parada, dá para não trocar pneus: pneus novos renderiam só ~{gain:.0f}s até o fim."
+                    out["mode"] = "keep"
+            elif gain > loss:
+                out["text"] = f"Desgaste alto: parar para pneus novos compensa (ganha ~{gain:.0f}s, o pit custa ~{loss:.0f}s)."
+                out["mode"] = "change"
+            else:
+                out["text"] = (f"Perde ~{slope:.2f}s/volta; até o fim são ~{gain:.0f}s, menos que o pit "
+                               f"({loss:.0f}s): fique na pista.")
+                out["mode"] = "keep"
+        if cliff:
+            out["text"] += " Atenção: as 2 últimas voltas caíram mais que o normal — o pneu pode estar no fim."
+            out["cliff"] = True
+        return out
+
+    def _tyre_messages(self, f):
+        d = self._tyre_deg(f, self._strategy(f))
+        if d.get("mode") in (None, "ok") or (d["mode"] == self.deg_mode and not d.get("cliff")):
+            return
+        self.deg_mode = d["mode"]
+        lvl = "bad" if d.get("cliff") else "warn" if d["mode"] == "change" else "info"
+        self.say(lvl, "pneus", d["text"], speak=d["mode"] != "keep", cooldown_key="deg", cooldown=120)
+
+    # ------------------------------------------------------------ clima (ACC)
+    def _weather_advice(self, f):
+        if f["rain_now"] < 0 or f["grip_status"] < 0:
+            return None
+        now, r10, r30, g, wet = f["rain_now"], f["rain_10"], f["rain_30"], f["grip_status"], f["rain_tyres"]
+        left = f["session_left_ms"] / 60000 if f["session_left_ms"] else None
+        out = {"now": RAIN_TXT[now], "in10": RAIN_TXT[r10] if r10 >= 0 else "–", "in30": RAIN_TXT[r30] if r30 >= 0 else "–",
+               "grip": GRIP_TXT[g], "tyres": "chuva" if wet else "slick", "rain": [now, r10, r30], "grip_n": g}
+        short = left is not None and left < CFG["wet_min_minutes"]
+        need_wet = g >= 5 or now >= 3 or (g >= 4 and now >= 2)
+        dry_ok = g <= 3 and now <= 1
+        if not wet:
+            if need_wet and short:
+                mode, text = "hold", f"Pista {GRIP_TXT[g]} com {RAIN_TXT[now]}, mas faltam só {left:.0f} min: segure com slick."
+            elif need_wet:
+                mode, text = "pit_wet", f"BOX PARA PNEUS DE CHUVA: pista {GRIP_TXT[g]} com {RAIN_TXT[now]}. Selecione Wet no menu de pit."
+            elif g == 4 or now == 2:
+                mode, text = "watch", f"Pista ficando úmida ({RAIN_TXT[now]}). Slick ainda segura; se aumentar, box para chuva."
+            elif r10 >= 2 and (left is None or left > 10):
+                mode, text = "soon", f"Chuva chegando em ~10 min ({RAIN_TXT[r10]}). Se for parar, deixe pneus de chuva no plano de pit."
+            elif r30 >= 2 and (left is None or left > 25):
+                mode, text = "forecast", f"Previsão de {RAIN_TXT[r30]} em ~30 min."
+            else:
+                mode, text = "dry", "Seco, sem chuva forte prevista para os próximos 30 min."
+        else:
+            if dry_ok and r10 <= 1 and short:
+                mode, text = "hold", f"Pista secando, mas faltam só {left:.0f} min: fique com os de chuva."
+            elif dry_ok and r10 <= 1:
+                mode, text = "pit_dry", f"BOX PARA SLICKS: pista {GRIP_TXT[g]} e sem chuva nos próximos 10 min."
+            elif dry_ok:
+                mode, text = "watch", f"Pista secando, mas volta {RAIN_TXT[r10]} em ~10 min: segure com pneus de chuva."
+            else:
+                mode, text = "wet", (f"{RAIN_TXT[now].capitalize()}, pista {GRIP_TXT[g]}: pneus de chuva são a escolha certa." if now
+                                     else f"Parou de chover, mas a pista está {GRIP_TXT[g]}: fique com os de chuva até secar.")
+        out.update(mode=mode, text=text)
+        return out
+
+    def _weather(self, f):
+        w = self._weather_advice(f)
+        self.weather = w
+        if not w:
+            return
+        if w["mode"] != self.weather_mode:
+            first = self.weather_mode is None
+            self.weather_mode = w["mode"]
+            if not (first and w["mode"] in ("dry", "wet")):
+                lvl = "bad" if w["mode"] in ("pit_wet", "pit_dry") else "warn" if w["mode"] in ("soon", "watch", "hold") else "info"
+                self.say(lvl, "clima", w["text"], cooldown_key="wx" + w["mode"], cooldown=90)
+        fc = (f["rain_10"], f["rain_30"])
+        if fc != self.weather_fc:
+            old = self.weather_fc
+            self.weather_fc = fc
+            if old != (-1, -1) and f["rain_10"] > old[0] and f["rain_10"] >= 2 and w["mode"] not in ("pit_wet", "soon"):
+                self.say("warn", "clima", f"Previsão mudou: {RAIN_TXT[f['rain_10']]} em ~10 min.", cooldown_key="wxfc", cooldown=120)
+
+    # ------------------------------------------------------------ evolução do piloto
+    def _seg_key(self, c):
+        frac = c.apex / self.n
+        for k in list(self.seg_hist) + list(self.reason_hist):
+            if abs(k - frac) < 0.01:
+                return k
+        return round(frac, 4)
+
+    def _corner_summary(self):
+        out = []
+        for c in self.corners:
+            seg = self.seg_hist.get(self._seg_key(c), [])
+            if seg:
+                out.append({"id": c.id, "apex": round(c.apex / self.n, 4), "best_ms": min(seg),
+                            "avg_ms": round(statistics.mean(seg)), "n": len(seg)})
+        return out
+
+    def session_report(self):
+        """Até 3 pontos para treinar, do que mais custou tempo nesta sessão."""
+        green = [l for l in self.laps if l["complete"] and not l.get("pit")]
+        if len(green) < 3:
+            return [{"score": 0, "title": "Faça pelo menos 3 voltas limpas", "text": "O relatório aparece com mais dados."}]
+        items = []
+        n = len(green)
+        for c in self.corners:
+            if len(c.history) >= 2:
+                avg = sum(c.history) / len(c.history)
+                if avg > 0.08:
+                    rh = self.reason_hist.get(self._seg_key(c), {})
+                    why = max(rh.values(), key=lambda x: x[0])[1] if rh else "compare linha e velocidade de ápice com a referência"
+                    items.append({"score": avg * n, "title": f"T{c.id}: perde {avg:.2f}s em média", "text": why})
+        for k, (name, tip) in HABITS.items():
+            tot = sum(l.get(k, 0) for l in green)
+            if tot / n >= 0.6:
+                items.append({"score": tot * 0.06, "title": f"Hábito: {name} ({tot / n:.1f} por volta)", "text": tip})
+        valid = [l["ms"] / 1000 for l in green if l["valid"]]
+        if len(valid) >= 4:
+            best = min(valid)
+            clean = [x for x in valid if x < best * 1.03]
+            sd = statistics.pstdev(clean) if len(clean) >= 3 else 0
+            if sd > 0.5:
+                items.append({"score": sd * n * 0.5, "title": f"Consistência: suas voltas variam ±{sd:.2f}s",
+                              "text": "faça séries de 5 voltas a ~98% repetindo os mesmos pontos de freio antes de atacar"})
+        items.sort(key=lambda x: -x["score"])
+        if not items:
+            return [{"score": 0, "title": "Sessão limpa ✓", "text": "Sem pontos fracos claros. Ataque os pontos de frenagem para baixar o tempo."}]
+        return items[:3]
+
+    def _pit_report(self):
+        green = [l for l in self.laps if l["complete"] and not l.get("pit")]
+        if len(green) - self.report_said_laps < 3:
+            return
+        self.report_said_laps = len(green)
+        rep = self.session_report()
+        if rep and rep[0]["score"] > 0:
+            self.say("info", "relatorio", "Resumo até aqui — foque em: " + "; ".join(r["title"] for r in rep[:2]) +
+                     ". Detalhes na aba Evolução.")
+
+    def history_payload(self):
+        with self.lock:
+            key = self.key()
+            cur_corners = [(c.id, c.apex / self.n) for c in self.corners]
+        folder = os.path.join(DATA_DIR, "sessoes")
+        try:
+            files = sorted(fn for fn in os.listdir(folder) if fn.endswith("__" + key + ".json"))
+        except OSError:
+            files = []
+        sessions = []
+        for fn in files[-40:]:
+            try:
+                with open(os.path.join(folder, fn), encoding="utf-8") as fh:
+                    d = json.load(fh)
+            except (OSError, ValueError):
+                continue
+            laps = [l for l in d.get("laps", []) if l.get("complete") and not l.get("pit")]
+            if not laps:
+                continue
+            valid = [l["ms"] for l in laps if l.get("valid")]
+            best = min(valid) if valid else None
+            clean = [x / 1000 for x in valid if x < best * 1.03] if best else []
+            n = len(laps)
+            stamp = fn.split("__")[0]
+            sessions.append({
+                "id": stamp, "date": f"{stamp[6:8]}/{stamp[4:6]} {stamp[9:11]}:{stamp[11:13]}", "laps": n,
+                "best_ms": best, "best": fmt_ms(best) if best else "–",
+                "median_ms": round(statistics.median(valid)) if valid else None,
+                "sd": round(statistics.pstdev(clean), 3) if len(clean) >= 3 else None,
+                "habits": {k: round(sum(l.get(k, 0) for l in laps) / n, 2) for k in HABITS},
+                "corners": d.get("corners", []), "report": d.get("report", []),
+                "current": stamp == self.session_started,
+            })
+        # evolução por curva: melhor trecho de cada sessão (curvas casadas pela posição do ápice)
+        corners = []
+        for cid, frac in cur_corners:
+            series = []
+            for s in sessions:
+                m = next((c for c in s["corners"] if abs(c["apex"] - frac) < 0.01), None)
+                series.append(m["best_ms"] if m else None)
+            vals = [v for v in series if v]
+            if len(vals) >= 2:
+                corners.append({"id": cid, "first": vals[0], "last": vals[-1], "best": min(vals),
+                                "delta": round((vals[-1] - vals[0]) / 1000, 3), "series": series})
+        bests = [s["best_ms"] for s in sessions if s["best_ms"]]
+        summary = None
+        if bests:
+            summary = {"pb": fmt_ms(min(bests)), "first": fmt_ms(bests[0]), "last": fmt_ms(bests[-1]),
+                       "gain": round((bests[0] - min(bests)) / 1000, 3), "sessions": len(sessions)}
+        for s in sessions:
+            s.pop("corners")
+        return {"key": key, "sessions": sessions, "corners": corners, "summary": summary,
+                "habit_names": {k: v[0] for k, v in HABITS.items()}}
+
+    TRACE_PTS = 700
+
+    def _trace_arrays(self, arrays):
+        step = max(1, self.n // self.TRACE_PTS)
+        out = {k: [round(v, 2) for v in arrays[k][::step]] for k in ("t", "speed", "gas", "brake")}
+        out["gear"] = [int(round(v)) for v in arrays["gear"][::step]] if arrays.get("gear") else None
+        if arrays.get("x"):
+            out["x"] = [round(v, 1) for v in arrays["x"][::step]]
+            out["y"] = [round(v, 1) for v in arrays["y"][::step]]
+        return out
+
+    def compare_payload(self, a="ref", b="last"):
+        """Duas voltas lado a lado: traçado, velocidade, pedais, marcha e diferença de tempo acumulada (b - a)."""
+        with self.lock:
+            step = max(1, self.n // self.TRACE_PTS)
+
+            def get(sel):
+                if sel == "ref":
+                    if not self.ref:
+                        return None
+                    return {"n": "ref", "ms": self.ref["ms"], "valid": True, "label": f"Referência {fmt_ms(self.ref['ms'])}",
+                            **self._trace_arrays(self.ref)}
+                if sel == "last":
+                    tr = self.traces[-1] if self.traces else None
+                elif sel == "best":
+                    pool = [x for x in self.traces if x["valid"] and not x["pit"]]
+                    tr = min(pool, key=lambda x: x["ms"]) if pool else None
+                else:
+                    tr = next((x for x in self.traces if str(x["n"]) == str(sel)), None)
+                if not tr:
+                    return None
+                return {**tr, "label": f"Volta {tr['n']} {fmt_ms(tr['ms'])}" + ("" if tr["valid"] else " (inválida)")}
+
+            A, B = get(a), get(b)
+            have = {x["n"] for x in self.traces}
+            best = min((l["ms"] for l in self.laps if l["valid"] and l["complete"] and not l.get("pit")), default=None)
+            stints = {}
+            for l in self.laps:
+                stints.setdefault(l.get("stint", 1), []).append({
+                    "n": l["n"], "time": l["time"], "ms": l["ms"], "valid": l["valid"], "pit": l.get("pit"),
+                    "wet": l.get("wet"), "fuel": l.get("fuel"), "trace": l["n"] in have,
+                    "best": bool(best) and l["ms"] == best and l["valid"]})
+            out = {"a": A, "b": B, "a_sel": a, "b_sel": b, "track_len": round(self.track_len),
+                   "ref": {"time": fmt_ms(self.ref["ms"])} if self.ref and not self.ref_provisional else None,
+                   "stints": [{"stint": k, "laps": v} for k, v in sorted(stints.items())],
+                   "corners": [{"id": c.id, "start": c.start / self.n, "apex": c.apex / self.n, "end": c.end / self.n}
+                               for c in self.corners]}
+            if A and B:
+                m = min(len(A["t"]), len(B["t"]))
+                out["delta"] = [round((B["t"][i] - A["t"][i]) / 1000, 3) for i in range(m)]
+                cmp = []
+                for c in self.corners:
+                    i0, i1 = int(c.start / step), min(m - 1, int(c.end / step))
+                    if i1 > i0:
+                        d = ((B["t"][i1] - B["t"][i0]) - (A["t"][i1] - A["t"][i0])) / 1000
+                        cmp.append({"id": c.id, "dt": round(d, 3),
+                                    "min_a": round(min(A["speed"][i0:i1 + 1])), "min_b": round(min(B["speed"][i0:i1 + 1]))})
+                out["corner_cmp"] = cmp
+                # mini-setores de mesmo comprimento: ganho/perda em cada trecho
+                k = 10
+                minis = []
+                for j in range(k):
+                    i0, i1 = j * (m - 1) // k, (j + 1) * (m - 1) // k
+                    minis.append({"i0": i0, "i1": i1, "dt": round(out["delta"][i1] - out["delta"][i0], 3)})
+                out["minis"] = minis
+            return out
 
     # ------------------------------------------------------------ corrida: estratégia
     def _strategy(self, f):
@@ -1304,6 +1693,8 @@ class Engine:
                 "cur_trace": cur_trace, "provisional": self.ref_provisional,
                 "corners": [{"id": c.id, "start": c.start / self.n, "apex": c.apex / self.n, "end": c.end / self.n} for c in self.corners],
                 "strategy": strat, "race": self._race_view(),
+                "weather": self.weather, "tyre_deg": self._tyre_deg(f, strat), "report": self.report,
+                "n_traces": len(self.traces),
             })
             return out
 

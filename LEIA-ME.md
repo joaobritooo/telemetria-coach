@@ -11,7 +11,7 @@ Pelo código-fonte, só precisa do `pywebview` (`pip install -r requirements.txt
    - Para fechar: botão **✕ Fechar** no rodapé ou Alt+F4 com o painel em foco.
 2. O painel abre numa janela própria em tela cheia no **monitor secundário** (sem Edge, não congela com o jogo em foco).
    Para regerar o .exe depois de mexer no código:
-   `python -m PyInstaller --noconfirm --onefile --windowed --name TelemetriaCoach --add-data "web;web" --collect-all webview --distpath .. main.py`
+   `python -m PyInstaller --noconfirm --onefile --windowed --name TelemetriaCoach --icon icone.ico --add-data "web;web" --collect-all webview --distpath .. main.py`
 3. Abra o ACC ou o AC e entre na pista. O app detecta o jogo sozinho.
 4. Para testar sem o jogo: **demo.bat**.
 
@@ -58,6 +58,32 @@ material de coaching real (botão **📚 Conceitos e fontes** no painel):
   de consumo para economizar com lift & coast sem parar.
 - **Pit:** perda estimada (25 s até você parar uma vez; depois usa a medida) e onde você volta na pista
   se parar agora. Avisos quando rivais próximos param (undercut/overcut).
+
+## Clima e pneus (aba 🏁)
+
+- **Chuva (ACC):** mostra chuva agora, previsão para 10 e 30 min e o estado da pista (verde → ótima → úmida → molhada).
+  O coach avisa quando a chuva está chegando e diz a hora de **entrar no box para pneus de chuva** (pista molhada,
+  ou úmida com chuva) e de **voltar para slick** (pista secando e sem chuva nos próximos 10 min). Perto do fim
+  (menos de 3 min), manda segurar na pista. O AC original não informa clima.
+- **Desgaste:** mede a queda de ritmo dentro de cada stint (descontando o combustível mais leve) a partir de 4 voltas
+  limpas. Diz quantos s/volta você perde, quanto pneus novos renderiam até o fim e se vale trocar na parada
+  (ou parar só para isso). Avisa quando as últimas voltas caem mais que o normal (pneu no fim).
+  No AC também mostra o desgaste % de cada pneu; no ACC, a espessura das pastilhas de freio.
+
+## Evolução (aba 📊)
+
+- **Comparar voltas (estilo Delta):** escolha a volta A e a volta B na lista por stint (ou a referência salva).
+  - **Traçado:** a linha das duas voltas desenhada na pista, a B colorida onde ganha (verde) ou perde (vermelho)
+    tempo. Roda do mouse dá zoom, arrastar move, duplo clique volta a ver tudo; "espelhar" se o desenho sair invertido.
+  - **Cursor:** passe o mouse no traçado ou nos gráficos e veja, no mesmo ponto das duas voltas, tempo, velocidade,
+    marcha, acelerador, freio e a diferença acumulada.
+  - **Mini-setores:** a volta dividida em 10 trechos iguais com o ganho/perda de cada um; clique para dar zoom.
+  - Também: velocidade sobreposta, diferença de tempo ao longo da volta, pedais e ganho/perda por curva.
+  - O traçado precisa da posição do carro, gravada nas voltas feitas a partir da versão 1.1.
+- **Relatório da sessão:** os 3 pontos que mais custaram tempo (curvas, hábitos como rolagem longa ou
+  travamentos, e consistência). O coach fala o resumo quando você entra no box depois de algumas voltas.
+- **Histórico:** melhor volta, mediana e consistência de cada sessão no mesmo carro + pista, recorde pessoal,
+  quanto você já evoluiu e a evolução do tempo em cada curva entre a primeira e a última sessão.
 
 ## Ajustes
 

@@ -1,6 +1,6 @@
 # Telemetria Coach
 
-Painel de telemetria em tempo real para **Assetto Corsa Competizione** e **Assetto Corsa**, feito para o monitor secundário. Traz coach de pilotagem por voz, dicas de setup, rivais ao vivo, estratégia de pit e combustível, spotter e mapa da pista.
+Painel de telemetria em tempo real para **Assetto Corsa Competizione** e **Assetto Corsa**, feito para o monitor secundário. Traz coach de pilotagem por voz, dicas de setup, rivais ao vivo, estratégia de pit e combustível, chuva e desgaste de pneus, spotter, mapa da pista e a evolução do piloto entre sessões.
 
 ## ⬇️ Download
 
@@ -25,5 +25,5 @@ O manual completo (o que o app faz, as opções e os ajustes) está em [LEIA-ME.
 
 ```
 pip install pyinstaller pywebview
-python -m PyInstaller --noconfirm --onefile --windowed --name TelemetriaCoach --add-data "web;web" --collect-all webview main.py
+python -m PyInstaller --noconfirm --onefile --windowed --name TelemetriaCoach --icon icone.ico --add-data "web;web" --collect-all webview main.py
 ```

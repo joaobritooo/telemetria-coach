@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Telemetria Coach</title>
+<link rel="icon" href="/icone.png">
 <style>
 :root{
   --bg:#0a0d12; --panel:#121720; --panel2:#171d28; --line:#232b39; --text:#e7ebf2; --muted:#8792a5;
@@ -78,6 +79,37 @@ button{background:var(--panel2);color:var(--text);border:1px solid var(--line);b
 button:hover{border-color:var(--blue)} button.on{border-color:var(--green);color:var(--green)}
 #offline{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(10,13,18,.92);flex-direction:column;gap:10px;font-size:20px;z-index:9}
 .legend span{margin-left:10px} .dot{display:inline-block;width:10px;height:3px;vertical-align:middle;margin-right:4px}
+.wx{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-bottom:6px}
+.wx>div{background:var(--panel2);border-radius:8px;padding:6px 8px;text-align:center}
+.wx b{display:block;font-size:15px}
+.plan.pit_wet,.plan.pit_dry,.plan.change{border-color:var(--red)} .plan.soon,.plan.watch,.plan.hold,.plan.deg{border-color:var(--amber)}
+.plan.forecast{border-color:var(--blue)}
+.rep{padding:8px 10px;background:var(--panel2);border-radius:8px;margin-bottom:6px;border-left:4px solid var(--amber)}
+.rep b{display:block}
+.sel{display:flex;gap:8px;align-items:center;margin-bottom:6px;font-size:13px;color:var(--muted)}
+select{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:3px 6px;font:inherit}
+.stat{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:8px}
+.stat>div{background:var(--panel2);border-radius:8px;padding:6px 8px}
+.stat b{display:block;font-size:18px}
+#viewE{display:flex;flex-direction:column;gap:8px;min-height:0}
+#viewE[hidden]{display:none}
+.subtabs{display:flex;gap:8px;align-items:center}
+.cmpgrid{display:grid;grid-template-columns:2.15fr 1fr;gap:10px;min-height:0;flex:1}
+.cmpgrid[hidden]{display:none}
+button.mini{padding:1px 8px;font-size:12px;border-radius:6px;margin-left:3px}
+button.mini.selA{border-color:var(--violet);color:var(--violet);background:rgba(180,140,255,.15)}
+button.mini.selB{border-color:var(--blue);color:var(--blue);background:rgba(79,166,255,.15)}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.chip{padding:3px 9px;font-size:12px;border-radius:6px;font-family:"Cascadia Mono",Consolas,monospace}
+.chip.g{background:rgba(47,210,122,.18);border-color:rgba(47,210,122,.5);color:var(--green)}
+.chip.r{background:rgba(255,84,104,.16);border-color:rgba(255,84,104,.5);color:var(--red)}
+.chip.on{outline:2px solid var(--text)}
+.cinfo{display:grid;grid-template-columns:1fr auto 1fr;gap:10px;align-items:center;margin-bottom:6px;min-height:28px}
+.cinfo .side{display:flex;gap:10px;align-items:center;background:var(--panel2);border-radius:8px;padding:5px 10px;font-size:13px;flex-wrap:wrap}
+.cinfo .mid{display:flex;flex-direction:column;align-items:center;min-width:110px}
+.cinfo .mid b{font-size:20px}
+.pbar{display:inline-block;width:46px;height:8px;background:var(--line);border-radius:4px;overflow:hidden}
+.pbar i{display:block;height:100%}
 @media (max-width:1100px){html,body{overflow:auto}.app{height:auto}main,header,.view{grid-template-columns:1fr}}
 </style>
 </head>
@@ -175,9 +207,70 @@ button:hover{border-color:var(--blue)} button.on{border-color:var(--green);color
           <div class="kv" id="stKv"></div>
           <div class="plan" id="stPlan">—</div>
         </div>
+        <div class="card">
+          <div class="label"><span>Clima e pneus</span><span id="wxMode"></span></div>
+          <div class="wx" id="wxGrid"></div>
+          <div class="plan" id="wxPlan" style="margin-top:0">—</div>
+          <div class="kv" id="degKv" style="margin-top:8px"></div>
+          <div class="plan" id="degPlan">—</div>
+        </div>
         <div class="card grow">
           <div class="label"><span>Pit stop</span><span id="pitLoss"></span></div>
           <div id="pitBox" class="sub">Projeção aparece quando houver dados dos rivais.</div>
+        </div>
+      </div>
+    </div>
+    <div class="view" id="viewE" hidden>
+      <div class="subtabs">
+        <button class="tab active" id="eTabC">🔍 Comparar voltas</button>
+        <button class="tab" id="eTabH">📈 Histórico e relatório</button>
+        <span class="sub" id="cmpTitle" style="margin-left:12px"></span>
+        <span id="cmpTot" class="mono" style="margin-left:auto;font-size:18px;font-weight:600"></span>
+      </div>
+      <div class="cmpgrid" id="eC">
+        <div class="col">
+          <div class="card" style="padding:8px 10px">
+            <div class="label"><span>Traçado <span class="legend"><span><i class="dot" style="background:var(--violet)"></i>A</span><span><i class="dot" style="background:linear-gradient(90deg,var(--green),var(--amber),var(--red))"></i>B (verde = ganhando)</span></span></span>
+              <span><button class="mini" id="mapMirror" title="Espelhar o desenho">⇋ espelhar</button> <button class="mini" id="mapReset">⤢ ver tudo</button></span></div>
+            <canvas id="cTrack" height="330" style="cursor:grab"></canvas>
+            <div class="sub" style="font-size:11px">roda do mouse: zoom · arrastar: mover · passe o mouse no traçado ou nos gráficos para ver os dados do ponto · duplo clique: ver tudo</div>
+          </div>
+          <div class="card" style="padding:8px 10px">
+            <div class="cinfo" id="cmpInfo"></div>
+            <canvas id="cCmp" height="130" style="cursor:crosshair"></canvas>
+            <canvas id="cDelta" height="60" style="cursor:crosshair;margin-top:4px"></canvas>
+            <canvas id="cPed" height="50" style="cursor:crosshair;margin-top:4px"></canvas>
+            <div class="chips" id="msChips"></div>
+          </div>
+        </div>
+        <div class="col">
+          <div class="card grow">
+            <div class="label"><span>Voltas por stint</span><span>escolha A e B</span></div>
+            <div class="scroll"><table id="lapPick"></table></div>
+          </div>
+          <div class="card" style="max-height:34vh;display:flex;flex-direction:column">
+            <div class="label"><span>Curva a curva (B − A)</span></div>
+            <div class="scroll"><table id="cmpTable"></table></div>
+          </div>
+        </div>
+      </div>
+      <div class="cmpgrid" id="eH" hidden>
+        <div class="col">
+          <div class="card">
+            <div class="label"><span>Relatório da sessão — o que treinar</span></div>
+            <div id="report"></div>
+          </div>
+          <div class="card grow">
+            <div class="label"><span>Evolução neste carro + pista</span><span class="legend"><span><i class="dot" style="background:var(--green)"></i>melhor</span><span><i class="dot" style="background:var(--muted)"></i>mediana</span></span></div>
+            <div class="stat" id="evoStat"></div>
+            <canvas id="cHist" height="200"></canvas>
+          </div>
+        </div>
+        <div class="col">
+          <div class="card grow">
+            <div class="label"><span>Sessões e curvas</span></div>
+            <div class="scroll"><table id="evoTable"></table><table id="evoCorners" style="margin-top:10px"></table></div>
+          </div>
         </div>
       </div>
     </div>
@@ -186,6 +279,7 @@ button:hover{border-color:var(--blue)} button.on{border-color:var(--green);color
   <footer>
     <button class="tab active" id="tabA">📈 Análise</button>
     <button class="tab" id="tabR">🏁 Corrida</button>
+    <button class="tab" id="tabE">📊 Evolução</button>
     <span style="width:12px"></span>
     <button id="btnVoice">🔈 Voz desligada</button>
     <button id="btnBeep">🔕 Bipes de frenagem</button>
@@ -264,10 +358,11 @@ function brakeCue(n){
 $('btnSrc').onclick = () => { $('modal').style.display = 'flex'; };
 let view = 'A', userPickedView = false;
 function setView(v, byUser){ view = v; if (byUser) userPickedView = true;
-  $('viewA').hidden = v !== 'A'; $('viewR').hidden = v !== 'R';
-  $('tabA').classList.toggle('active', v === 'A'); $('tabR').classList.toggle('active', v === 'R'); }
+  ['A', 'R', 'E'].forEach(k => { $('view' + k).hidden = v !== k; $('tab' + k).classList.toggle('active', v === k); });
+  if (v === 'E') { loadHistory(); loadCompare(); cmpDirty = true; } }
 $('tabA').onclick = () => setView('A', true);
 $('tabR').onclick = () => setView('R', true);
+$('tabE').onclick = () => setView('E', true);
 
 const fmtGap = g => g == null ? '–' : (g > 0 ? '+' : g < 0 ? '−' : '') + Math.abs(g).toFixed(1);
 function duelBox(d, label, ahead){
@@ -318,6 +413,7 @@ function renderRace(s){
   $('stPlan').className = 'plan ' + (st.mode || '');
   $('stPlan').textContent = st.plan || '—';
   $('stMode').innerHTML = st.mode === 'save' ? '<span class="warn">MODO ECONOMIA</span>' : st.mode === 'pit' ? '<span class="bad">PIT NECESSÁRIO</span>' : '';
+  renderWx(s);
   $('pitLoss').textContent = `perda ${st.pit_loss}s ${st.pit_loss_measured ? '(medida)' : '(estimada até você parar uma vez)'}`;
   const rj = r.rejoin;
   $('pitBox').innerHTML = rj ? `<div style="font-size:18px">Se parar <b>agora</b>: volta em <b class="big">P${rj.pos}</b></div>
@@ -412,6 +508,8 @@ function render(s){
   if (mv != null && mv !== mapVersion) { mapVersion = mv; fetch('/api/map').then(r => r.json()).then(r => { mapPts = r.pts || []; }); }
   if (s.ref_version !== refVersion) { refVersion = s.ref_version; fetch('/api/ref').then(r => r.json()).then(r => { ref = r; }); }
   renderFeed(s.messages || []);
+  renderReport(s.report);
+  if (view === 'E' && s.n_traces !== lastTraces) { lastTraces = s.n_traces; loadCompare(); if (Date.now() - histAt > 20000) loadHistory(); }
   try { renderRace(s); } catch(e) { console.error(e); }
   if (!s.live) return;
   const L = s.live;
@@ -551,16 +649,271 @@ function drawMap(){
   $('mapInfo').textContent = pts.length < mapPts.length * 0.9 ? `montando traçado… ${Math.round(pts.length / Math.max(1, mapPts.length) * 100)}%` : '';
 }
 
+// ---------------------------------------------------------------- clima e desgaste (aba Corrida)
+const WX_LABEL = {pit_wet: '<span class="bad">BOX: CHUVA</span>', pit_dry: '<span class="bad">BOX: SLICK</span>', soon: '<span class="warn">CHUVA EM 10 MIN</span>',
+  watch: '<span class="warn">ATENÇÃO</span>', hold: '<span class="warn">SEGURE</span>', forecast: '<span class="info">PREVISÃO</span>'};
+const rainCls = v => v >= 3 ? 'bad' : v >= 1 ? 'warn' : 'good';
+function renderWx(s){
+  const w = s.weather, d = s.tyre_deg || {};
+  if (w) {
+    $('wxGrid').innerHTML = [['Agora', w.now, rainCls(w.rain[0])], ['Em 10 min', w.in10, rainCls(w.rain[1])], ['Em 30 min', w.in30, rainCls(w.rain[2])],
+      ['Pista', w.grip, w.grip_n >= 4 ? 'bad' : w.grip_n === 3 ? 'warn' : 'good'], ['Seus pneus', w.tyres, '']]
+      .map(([k, v, c]) => `<div><span class="sub">${k}</span><b class="${c}">${v}</b></div>`).join('');
+    $('wxPlan').className = 'plan ' + w.mode; $('wxPlan').textContent = w.text;
+    $('wxMode').innerHTML = WX_LABEL[w.mode] || '';
+  } else {
+    $('wxGrid').innerHTML = ''; $('wxMode').innerHTML = '';
+    $('wxPlan').className = 'plan'; $('wxPlan').textContent = s.sim === 'ac' ? 'O AC original não informa chuva nem previsão.' : 'Sem dados de clima.';
+  }
+  const kv = [['Stint', d.stint != null ? `${d.stint} · ${d.age} voltas nestes pneus` : '–'],
+    ['Queda de ritmo', d.deg != null ? (d.deg > 0 ? '+' : '') + d.deg.toFixed(2) + ' s/volta' : 'medindo…']];
+  if (d.lost) kv.push(['Perdido no stint', '~' + d.lost.toFixed(1) + ' s/volta vs. novos']);
+  if (d.gain_new != null) kv.push(['Pneus novos até o fim', '~' + d.gain_new + ' s']);
+  if (d.wear) kv.push(['Desgaste (AC)', d.wear.map(x => x.toFixed(1) + '%').join(' · ') + (d.wear_rate ? ` (−${d.wear_rate}%/volta)` : '')]);
+  if (d.pad) kv.push(['Pastilhas', d.pad.map(x => x.toFixed(1)).join(' · ') + ' mm' + (d.pad_rate ? ` (−${d.pad_rate} mm/volta)` : '')]);
+  $('degKv').innerHTML = kv.map(([k, v]) => `<span>${k}</span><span class="mono">${v}</span>`).join('');
+  $('degPlan').className = 'plan ' + (d.mode || ''); $('degPlan').textContent = d.text || '—';
+}
+
+// ---------------------------------------------------------------- evolução
+let lastTraces = -1, histAt = 0, evoHist = null, cmp = null, cmpDirty = false;
+function renderReport(rep){
+  if (!rep) return;
+  $('report').innerHTML = rep.map(r => `<div class="rep"><b>${r.title}</b><span class="sub">${r.text}</span></div>`).join('');
+}
+function loadHistory(){
+  histAt = Date.now();
+  fetch('/api/history').then(r => r.json()).then(h => { evoHist = h; renderHistory(); cmpDirty = true; }).catch(() => {});
+}
+// ---------------------------------------------------------------- comparador de voltas (estilo Delta)
+let selA = 'ref', selB = 'last', cur = null, msSel = null, eSub = 'C';
+let tv = {z: 1, ox: 0, oy: 0}, drag = null, mirror = false;
+try { mirror = localStorage.getItem('cmpMirror') === '1'; } catch(e) {}
+function setSub(v){ eSub = v; $('eC').hidden = v !== 'C'; $('eH').hidden = v !== 'H';
+  $('eTabC').classList.toggle('active', v === 'C'); $('eTabH').classList.toggle('active', v === 'H'); cmpDirty = true; }
+$('eTabC').onclick = () => setSub('C'); $('eTabH').onclick = () => { setSub('H'); loadHistory(); };
+$('mapMirror').onclick = () => { mirror = !mirror; try{localStorage.setItem('cmpMirror', mirror?'1':'0')}catch(e){}; cmpDirty = true; };
+$('mapReset').onclick = () => { tv = {z: 1, ox: 0, oy: 0}; msSel = null; renderChips(); cmpDirty = true; };
+
+function loadCompare(){
+  fetch(`/api/compare?a=${encodeURIComponent(selA)}&b=${encodeURIComponent(selB)}`).then(r => r.json())
+    .then(c => { cmp = c; renderCompare(); cmpDirty = true; }).catch(() => {});
+}
+function pick(which, v){ if (which === 'A') selA = v; else selB = v; cur = null; msSel = null; loadCompare(); }
+window.pick = pick;
+
+function renderCompare(){
+  const c = cmp; if (!c) return;
+  const A = c.a, B = c.b;
+  $('cmpTitle').innerHTML = `<span style="color:var(--violet)">A: ${A ? A.label : '—'}</span> &nbsp;·&nbsp; <span style="color:var(--blue)">B: ${B ? B.label : '—'}</span>`;
+  const tot = c.delta && c.delta.length ? c.delta[c.delta.length - 1] : null;
+  $('cmpTot').innerHTML = tot == null ? '<span class="sub" style="font-size:13px">complete uma volta para comparar</span>' : `B ${tot > 0 ? '+' : '−'}${Math.abs(tot).toFixed(3)}s`;
+  $('cmpTot').style.color = tot > 0 ? css('--red') : css('--green');
+  // lista de voltas por stint
+  const btn = (w, v) => `<button class="mini ${(w === 'A' ? selA : selB) === String(v) ? 'sel' + w : ''}" onclick="pick('${w}','${v}')">${w}</button>`;
+  let rows = '<tr><th>Volta</th><th>Tempo</th><th></th><th></th></tr>';
+  if (c.ref) rows += `<tr><td><b>Referência</b></td><td class="mono good">${c.ref.time}</td><td class="sub">melhor salva</td><td style="white-space:nowrap">${btn('A', 'ref')}${btn('B', 'ref')}</td></tr>`;
+  c.stints.slice().reverse().forEach(st => {
+    rows += `<tr><td colspan="4" class="sub" style="padding-top:8px">STINT ${st.stint}${st.laps.some(l => l.wet) ? ' · pneus de chuva' : ''}</td></tr>`;
+    st.laps.slice().reverse().forEach(l => {
+      const tag = [l.pit ? 'box' : '', l.valid ? '' : 'inválida', l.best ? '★ melhor' : ''].filter(x => x).join(' · ');
+      rows += `<tr><td>${l.n}</td><td class="mono ${l.best ? 'good' : l.valid ? '' : 'bad'}">${l.time}</td><td class="sub">${tag}</td>
+        <td style="white-space:nowrap">${l.trace ? btn('A', l.n) + btn('B', l.n) : '<span class="sub">sem dados</span>'}</td></tr>`;
+    });
+  });
+  $('lapPick').innerHTML = rows;
+  $('cmpTable').innerHTML = c.corner_cmp && c.corner_cmp.length ? '<tr><th>Curva</th><th>B − A</th><th>Mín. A</th><th>Mín. B</th></tr>' + c.corner_cmp.map(x =>
+    `<tr><td><b>T${x.id}</b></td><td class="mono ${x.dt > 0.03 ? 'bad' : x.dt < -0.03 ? 'good' : ''}">${x.dt > 0 ? '+' : ''}${x.dt.toFixed(2)}s</td><td class="mono">${x.min_a}</td><td class="mono ${x.min_b < x.min_a - 2 ? 'bad' : x.min_b > x.min_a + 2 ? 'good' : ''}">${x.min_b}</td></tr>`).join('')
+    : '<tr><td class="sub">Sem curvas mapeadas ainda.</td></tr>';
+  renderChips();
+  renderInfo();
+}
+function renderChips(){
+  const ms = cmp && cmp.minis || [];
+  $('msChips').innerHTML = ms.map((m, i) => `<button class="chip ${m.dt < -0.005 ? 'g' : m.dt > 0.005 ? 'r' : ''} ${msSel === i ? 'on' : ''}" onclick="selMini(${i})">MS${i + 1} ${m.dt > 0 ? '+' : m.dt < 0 ? '−' : '±'}${Math.abs(m.dt).toFixed(2)}s</button>`).join('');
+}
+window.selMini = i => {
+  msSel = msSel === i ? null : i; renderChips();
+  if (msSel == null) { tv = {z: 1, ox: 0, oy: 0}; cmpDirty = true; return; }
+  // zoom no trecho
+  const m = cmp.minis[i], L = cmp.b && cmp.b.x ? cmp.b : cmp.a;
+  if (L && L.x) { const g = trackGeom(); if (g) {
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    for (let k = m.i0; k <= m.i1; k++) { const [a, b] = g.base(L.x[k], L.y[k]); x0 = Math.min(x0, a); x1 = Math.max(x1, a); y0 = Math.min(y0, b); y1 = Math.max(y1, b); }
+    const z = Math.min(8, 0.8 * Math.min(g.W / Math.max(20, x1 - x0), g.H / Math.max(20, y1 - y0)));
+    tv = {z, ox: g.W / 2 - (x0 + x1) / 2 * z, oy: g.H / 2 - (y0 + y1) / 2 * z};
+  } }
+  cur = Math.round((m.i0 + m.i1) / 2); renderInfo(); cmpDirty = true;
+};
+
+// geometria do mapa: encaixa as duas voltas no canvas (base) + zoom/arrasto do usuário (tv)
+function trackGeom(){
+  const c = cmp || {}, ls = [c.a, c.b].filter(l => l && l.x);
+  if (!ls.length) return null;
+  const cv = $('cTrack'), r = cv.getBoundingClientRect(), W = r.width, H = parseInt(cv.getAttribute('height'));
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  ls.forEach(l => l.x.forEach((x, i) => { const y = l.y[i]; x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }));
+  const pad = 14, k = Math.min((W - 2 * pad) / Math.max(1, x1 - x0), (H - 2 * pad) / Math.max(1, y1 - y0));
+  const ox = (W - (x1 - x0) * k) / 2, oy = (H - (y1 - y0) * k) / 2;
+  const base = (x, y) => [mirror ? W - (ox + (x - x0) * k) : ox + (x - x0) * k, oy + (y - y0) * k];
+  return {W, H, k, base, P: (x, y) => { const [a, b] = base(x, y); return [a * tv.z + tv.ox, b * tv.z + tv.oy]; }};
+}
+function drawTrack(){
+  const want = String(Math.max(220, Math.min(560, window.innerHeight - 610)));
+  if ($('cTrack').getAttribute('height') !== want) { $('cTrack').setAttribute('height', want); $('cTrack').width = 0; }
+  const [ctx, W, H] = fitCanvas($('cTrack'));
+  ctx.clearRect(0, 0, W, H);
+  const c = cmp || {}, A = c.a, B = c.b, g = trackGeom();
+  if (!g) { ctx.fillStyle = css('--muted'); ctx.font = '13px Segoe UI';
+    ctx.fillText(A || B ? 'Sem posição gravada nestas voltas: o traçado aparece nas voltas gravadas a partir desta versão.' : 'Complete uma volta para comparar.', 10, 22); return; }
+  const P = g.P, line = (L, i0, i1) => { ctx.beginPath(); for (let i = i0; i <= i1; i++) { const [a, b] = P(L.x[i], L.y[i]); i === i0 ? ctx.moveTo(a, b) : ctx.lineTo(a, b); } };
+  const base = B && B.x ? B : A, n = base.x.length;
+  // pista (faixa de ~12 m)
+  ctx.lineJoin = ctx.lineCap = 'round';
+  ctx.strokeStyle = '#1c2330'; ctx.lineWidth = Math.max(8, 12 * g.k * tv.z); line(base, 0, n - 1); ctx.closePath(); ctx.stroke();
+  // mini-setor selecionado
+  if (msSel != null && c.minis) { const m = c.minis[msSel]; ctx.strokeStyle = 'rgba(79,166,255,.18)'; ctx.lineWidth = Math.max(14, 18 * g.k * tv.z); line(base, m.i0, m.i1); ctx.stroke(); }
+  // A: linha violeta
+  if (A && A.x) { ctx.strokeStyle = css('--violet'); ctx.lineWidth = 1.6; ctx.setLineDash([5, 4]); line(A, 0, A.x.length - 1); ctx.stroke(); ctx.setLineDash([]); }
+  // B: colorida pelo ganho/perda local (inclinação do delta)
+  if (B && B.x) {
+    // cor suavizada: tendência do delta numa janela de ~3% da volta (evita "picotar" a linha)
+    const d = c.delta || [], w = Math.max(6, Math.round(B.x.length * 0.015)), thr = 0.0006 * w;
+    const colOf = i => { if (!d.length) return css('--amber'); const s = d[Math.min(d.length - 1, i + w)] - d[Math.max(0, i - w)];
+      return s < -thr ? css('--green') : s > thr ? css('--red') : css('--amber'); };
+    ctx.lineWidth = 3.5;
+    let i = 0;
+    while (i < B.x.length - 1) {
+      const col = colOf(i); let j = i + 1;
+      while (j < B.x.length - 1 && colOf(j) === col) j++;
+      ctx.strokeStyle = col; line(B, i, j); ctx.stroke(); i = j;
+    }
+  }
+  // largada e curvas
+  { const [a, b] = P(base.x[0], base.y[0]); ctx.fillStyle = css('--text'); ctx.fillRect(a - 2, b - 8, 4, 16); }
+  ctx.font = '11px Segoe UI'; ctx.fillStyle = css('--muted'); ctx.textAlign = 'center';
+  (c.corners || []).forEach(k => { const i = Math.min(n - 1, Math.round(k.apex * (n - 1))); const [a, b] = P(base.x[i], base.y[i]); ctx.fillText('T' + k.id, a + 14, b - 10); });
+  ctx.textAlign = 'start';
+  // cursor
+  if (cur != null) [[A, css('--violet')], [B, css('--blue')]].forEach(([L, col]) => {
+    if (!L || !L.x || cur >= L.x.length) return; const [a, b] = P(L.x[cur], L.y[cur]);
+    ctx.fillStyle = col; ctx.strokeStyle = '#0a0d12'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(a, b, 6, 0, 6.3); ctx.fill(); ctx.stroke(); });
+}
+// interação no mapa: zoom, arrasto, cursor
+(() => {
+  const cv = $('cTrack');
+  const pos = e => { const r = cv.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+  cv.addEventListener('wheel', e => { e.preventDefault(); const [mx, my] = pos(e), f = e.deltaY < 0 ? 1.25 : 0.8;
+    const z = Math.max(1, Math.min(30, tv.z * f)), r = z / tv.z; tv.ox = mx - (mx - tv.ox) * r; tv.oy = my - (my - tv.oy) * r; tv.z = z;
+    if (z === 1) tv = {z: 1, ox: 0, oy: 0}; cmpDirty = true; }, {passive: false});
+  cv.addEventListener('mousedown', e => { const [x, y] = pos(e); drag = {x, y, ox: tv.ox, oy: tv.oy}; cv.style.cursor = 'grabbing'; });
+  window.addEventListener('mouseup', () => { drag = null; cv.style.cursor = 'grab'; });
+  cv.addEventListener('mousemove', e => {
+    const [x, y] = pos(e);
+    if (drag) { tv.ox = drag.ox + x - drag.x; tv.oy = drag.oy + y - drag.y; cmpDirty = true; return; }
+    const g = trackGeom(), L = cmp && (cmp.b && cmp.b.x ? cmp.b : cmp.a); if (!g || !L || !L.x) return;
+    let best = null, bd = 30 * 30;
+    for (let i = 0; i < L.x.length; i++) { const [a, b] = g.P(L.x[i], L.y[i]), d = (a - x) ** 2 + (b - y) ** 2; if (d < bd) { bd = d; best = i; } }
+    if (best != null && best !== cur) { cur = best; renderInfo(); cmpDirty = true; }
+  });
+  cv.addEventListener('dblclick', () => { tv = {z: 1, ox: 0, oy: 0}; cmpDirty = true; });
+  ['cCmp', 'cDelta', 'cPed'].forEach(id => $(id).addEventListener('mousemove', e => {
+    const r = $(id).getBoundingClientRect(), L = cmp && (cmp.b || cmp.a); if (!L) return;
+    const i = Math.max(0, Math.min(L.t.length - 1, Math.round((e.clientX - r.left) / r.width * (L.t.length - 1))));
+    if (i !== cur) { cur = i; renderInfo(); cmpDirty = true; } }));
+})();
+function renderInfo(){
+  const c = cmp || {}, A = c.a, B = c.b;
+  if (!A && !B) { $('cmpInfo').innerHTML = ''; return; }
+  const n = (B || A).t.length, i = cur == null ? null : Math.min(cur, n - 1);
+  const side = (L, col, name) => {
+    if (!L) return `<div class="side"><span class="sub">${name}: —</span></div>`;
+    if (i == null) return `<div class="side"><b style="color:${col}">${name}</b><span class="mono">${L.label}</span></div>`;
+    const gear = L.gear ? L.gear[i] : null;
+    return `<div class="side"><b style="color:${col}">${name}</b><span class="mono">${fmtS(L.t[i])}</span>
+      <span class="mono">${Math.round(L.speed[i])} km/h</span><span class="mono">${gear == null ? '' : gear <= 0 ? 'N' : gear + 'ª'}</span>
+      <span class="pbar"><i style="width:${L.gas[i] * 100}%;background:var(--green)"></i></span><span class="mono sub">${Math.round(L.gas[i] * 100)}%</span>
+      <span class="pbar"><i style="width:${L.brake[i] * 100}%;background:var(--red)"></i></span><span class="mono sub">${Math.round(L.brake[i] * 100)}%</span></div>`;
+  };
+  const d = i != null && c.delta ? c.delta[Math.min(i, c.delta.length - 1)] : null;
+  const dist = i != null ? Math.round(i / (n - 1) * (c.track_len || 0)) : null;
+  $('cmpInfo').innerHTML = side(A, css('--violet'), 'A') +
+    `<div class="mid"><span class="sub">${dist != null ? dist + ' m' : 'passe o mouse'}</span><b class="mono ${d > 0 ? 'bad' : d < 0 ? 'good' : ''}">${d == null ? '' : (d > 0 ? '+' : d < 0 ? '−' : '±') + Math.abs(d).toFixed(3) + 's'}</b></div>` +
+    side(B, css('--blue'), 'B');
+}
+function plotLines(cv, series, opts){
+  const [ctx, W, H] = fitCanvas(cv);
+  ctx.clearRect(0, 0, W, H);
+  const all = series.flatMap(s => s.data || []).filter(v => v != null);
+  if (!all.length) { ctx.fillStyle = css('--muted'); ctx.font = '12px Segoe UI'; ctx.fillText(opts.empty || 'sem dados', 8, 18); return; }
+  let lo = opts.min != null ? opts.min : Math.min(...all), hi = opts.max != null ? opts.max : Math.max(...all);
+  if (opts.sym) { const m = Math.max(0.05, Math.abs(lo), Math.abs(hi)); lo = -m; hi = m; }
+  if (hi - lo < 1e-6) { hi += 1; lo -= 1; }
+  const pad = 4, y = v => H - pad - (v - lo) / (hi - lo) * (H - 2 * pad);
+  if (opts.corners && cmp && cmp.corners) cmp.corners.forEach(c => {
+    ctx.fillStyle = 'rgba(255,255,255,0.035)'; ctx.fillRect(c.start * W, 0, (c.end - c.start) * W, H);
+    if (opts.labels) { ctx.fillStyle = css('--muted'); ctx.font = '10px Segoe UI'; ctx.fillText('T' + c.id, c.apex * W - 6, 11); }
+  });
+  if (opts.cursor && msSel != null && cmp && cmp.minis) { const m = cmp.minis[msSel], len = (series[0].data || []).length - 1 || 1;
+    ctx.fillStyle = 'rgba(79,166,255,.12)'; ctx.fillRect(m.i0 / len * W, 0, (m.i1 - m.i0) / len * W, H); }
+  if (opts.sym) { ctx.strokeStyle = css('--line'); ctx.beginPath(); ctx.moveTo(0, y(0)); ctx.lineTo(W, y(0)); ctx.stroke();
+    ctx.fillStyle = css('--muted'); ctx.font = '10px Segoe UI'; ctx.fillText('+' + hi.toFixed(2) + 's', 2, 10); }
+  series.forEach(s => {
+    const d = s.data || []; if (!d.length) return;
+    ctx.strokeStyle = s.color; ctx.lineWidth = s.w || 1.5; ctx.setLineDash(s.dash || []); ctx.beginPath();
+    let pen = false;
+    d.forEach((v, i) => { if (v == null) { pen = false; return; } const x = d.length > 1 ? i / (d.length - 1) * W : W / 2;
+      pen ? ctx.lineTo(x, y(v)) : ctx.moveTo(x, y(v)); pen = true;
+      if (s.dots) { ctx.fillStyle = s.color; ctx.fillRect(x - 2, y(v) - 2, 4, 4); } });
+    ctx.stroke(); ctx.setLineDash([]);
+  });
+  if (opts.cursor && cur != null) { const len = (series.find(s => s.data && s.data.length) || {data: [0, 0]}).data.length - 1 || 1;
+    const x = cur / len * W; ctx.strokeStyle = css('--text'); ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
+}
+function drawCompare(){
+  const c = cmp || {}, A = c.a || {}, B = c.b || {};
+  drawTrack();
+  plotLines($('cCmp'), [{data: A.speed, color: css('--violet')}, {data: B.speed, color: css('--blue'), w: 2}], {min: 0, corners: true, labels: true, cursor: true, empty: 'Complete uma volta para comparar.'});
+  plotLines($('cDelta'), [{data: c.delta, color: css('--amber'), w: 2}], {sym: true, corners: true, cursor: true, empty: ''});
+  plotLines($('cPed'), [{data: A.brake, color: css('--red'), dash: [4, 3], w: 1}, {data: A.gas, color: css('--green'), dash: [4, 3], w: 1},
+    {data: B.brake, color: css('--red')}, {data: B.gas, color: css('--green')}], {min: 0, max: 1, corners: true, cursor: true, empty: ''});
+}
+function drawHist(){
+  const ss = evoHist && evoHist.sessions || [];
+  plotLines($('cHist'), [{data: ss.map(s => s.median_ms && s.median_ms / 1000), color: css('--muted'), dots: true},
+    {data: ss.map(s => s.best_ms && s.best_ms / 1000), color: css('--green'), w: 2, dots: true}], {empty: 'O histórico aparece depois da primeira volta válida.'});
+}
+const fmtS = ms => { if (!ms) return '–'; const t = ms / 1000, m = Math.floor(t / 60); return m + ':' + (t - m * 60).toFixed(3).padStart(6, '0'); };
+function renderHistory(){
+  const h = evoHist; if (!h) return;
+  const sm = h.summary;
+  $('evoStat').innerHTML = sm ? [['Recorde pessoal', sm.pb, 'good'], ['Primeira sessão', sm.first, ''], ['Ganho total', sm.gain > 0 ? '−' + sm.gain.toFixed(3) + 's' : '–', sm.gain > 0 ? 'good' : ''],
+    ['Sessões', sm.sessions, '']].map(([k, v, c]) => `<div><span class="sub">${k}</span><b class="mono ${c}">${v}</b></div>`).join('') : '';
+  const names = h.habit_names || {};
+  const ss = h.sessions.slice().reverse();
+  $('evoTable').innerHTML = ss.length ? '<tr><th>Sessão</th><th>Voltas</th><th>Melhor</th><th>Mediana</th><th>Consist.</th><th>Erros/volta</th></tr>' + ss.map(s => {
+    const hab = Object.entries(s.habits).filter(([, v]) => v >= 0.3).sort((a, b) => b[1] - a[1]).slice(0, 2)
+      .map(([k, v]) => `${names[k] || k} ${v}`).join(', ');
+    return `<tr class="${s.current ? 'me' : ''}"><td>${s.date}${s.current ? ' (agora)' : ''}</td><td>${s.laps}</td><td class="mono good">${s.best}</td><td class="mono">${fmtS(s.median_ms)}</td>
+      <td class="mono">${s.sd != null ? '±' + s.sd.toFixed(2) + 's' : '–'}</td><td class="sub">${hab || '—'}</td></tr>`; }).join('')
+    : '<tr><td class="sub">Nenhuma sessão salva para este carro + pista ainda.</td></tr>';
+  $('evoCorners').innerHTML = h.corners.length ? '<tr><th>Curva</th><th>1ª sessão</th><th>Última</th><th>Melhor</th><th>Evolução</th></tr>' + h.corners.map(c =>
+    `<tr><td><b>T${c.id}</b></td><td class="mono">${(c.first / 1000).toFixed(2)}s</td><td class="mono">${(c.last / 1000).toFixed(2)}s</td><td class="mono">${(c.best / 1000).toFixed(2)}s</td>
+     <td class="mono ${c.delta < -0.02 ? 'good' : c.delta > 0.02 ? 'bad' : ''}">${c.delta > 0 ? '+' : ''}${c.delta.toFixed(2)}s</td></tr>`).join('')
+    : '<tr><td class="sub">A evolução por curva aparece a partir da 2ª sessão neste carro + pista.</td></tr>';
+}
+
 function loop(){
   const t = performance.now(); pf.n++; pf.gap = Math.max(pf.gap, t - pf.last); pf.last = t;
   if (t - pf.since > 10000) {
     fetch('/api/perf', {method:'POST', body: JSON.stringify({fps: Math.round(pf.n / ((t - pf.since)/1000)), gap: Math.round(pf.gap)})}).catch(() => {});
     pf = {n: 0, gap: 0, last: t, since: t};
   }
-  try { if (view === 'A') { drawSpeed(); drawInputs(); } else drawMap(); } catch(e) { console.error(e); }
+  try { if (view === 'A') { drawSpeed(); drawInputs(); } else if (view === 'R') drawMap(); else if (cmpDirty) { cmpDirty = false; if (eSub === 'C') drawCompare(); else drawHist(); } } catch(e) { console.error(e); }
   $('clock').textContent = new Date().toLocaleTimeString('pt-BR');
 }
 setInterval(loop, 1000/20);
+window.addEventListener('resize', () => { cmpDirty = true; });
 
 function connect(){
   const es = new EventSource('/stream');

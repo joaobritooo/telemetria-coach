@@ -80,6 +80,10 @@ class GraphicsACC(ctypes.Structure):
         ("GlobalGreen", c_i), ("GlobalChequered", c_i), ("GlobalRed", c_i), ("mfdTyreSet", c_i),
         ("mfdFuelToAdd", c_f), ("mfdTyrePressureLF", c_f), ("mfdTyrePressureRF", c_f),
         ("mfdTyrePressureLR", c_f), ("mfdTyrePressureRR", c_f),
+        # ACC 1.8+: clima e pista
+        ("trackGripStatus", c_i), ("rainIntensity", c_i), ("rainIntensityIn10min", c_i),
+        ("rainIntensityIn30min", c_i), ("currentTyreSet", c_i), ("strategyTyreSet", c_i),
+        ("gapAhead", c_i), ("gapBehind", c_i),
     ]
 
 
@@ -199,6 +203,13 @@ def make_frame(**kw):
         tc_active=False, abs_active=False, bias=0.0, compound="", air=0.0, road=0.0, rain_tyres=False,
         # corrida / estratégia
         session_left_ms=0, total_laps=0, timed=True, extra_lap=False, pit_missing=0, mfd_fuel=None,
+        # clima (só ACC; -1 = desconhecido). chuva: 0 seco, 1 garoa, 2 fraca, 3 média, 4 forte, 5 tempestade
+        # pista: 0 verde, 1 rápida, 2 ótima, 3 escorregadia, 4 úmida, 5 molhada, 6 alagada
+        rain_now=-1, rain_10=-1, rain_30=-1, grip_status=-1, tyre_set=0,
+        # desgaste: AC = % de pneu restante (100 = novo); ACC não informa (fica vazio). Pastilhas em mm (ACC).
+        wear=[], pad=[],
+        # posição do seu carro no mundo (m), para desenhar o traçado da volta
+        x=None, y=None,
     )
     base.update(kw)
     return base
@@ -285,7 +296,43 @@ class SharedMemorySource:
             total_laps=g.numberOfLaps, timed=bool(s.isTimedRace) or g.numberOfLaps <= 0,
             extra_lap=bool(s.hasExtraLap), pit_missing=g.missingMandatoryPits if is_acc and 0 < g.missingMandatoryPits < 10 else 0,
             mfd_fuel=round(g.mfdFuelToAdd, 1) if is_acc and 0 <= g.mfdFuelToAdd < 300 else None,
+            **self._weather(g, p, is_acc),
+            **self._position(g, is_acc),
         )
+
+    @staticmethod
+    def _position(g, is_acc):
+        try:
+            if is_acc:
+                n = max(0, min(60, g.activeCars))
+                i = next((k for k in range(n) if g.carID[k] == g.playerCarID), None)
+                if i is None:
+                    return {}
+                x, z = g.carCoordinates[i * 3], g.carCoordinates[i * 3 + 2]
+            else:
+                x, z = g.carCoordinates[0], g.carCoordinates[2]
+        except (AttributeError, IndexError):
+            return {}
+        if (x == 0 and z == 0) or abs(x) > 1e5 or abs(z) > 1e5:
+            return {}
+        return {"x": round(x, 2), "y": round(z, 2)}
+
+    @staticmethod
+    def _weather(g, p, is_acc):
+        out = {}
+        if is_acc:
+            ok = lambda v, hi: v if 0 <= v <= hi else -1
+            out.update(rain_now=ok(g.rainIntensity, 5), rain_10=ok(g.rainIntensityIn10min, 5),
+                       rain_30=ok(g.rainIntensityIn30min, 5), grip_status=ok(g.trackGripStatus, 6),
+                       tyre_set=g.currentTyreSet if 0 < g.currentTyreSet < 100 else 0)
+            pads = list(p.padLife)
+            if all(0 < x < 60 for x in pads):
+                out["pad"] = [round(x, 2) for x in pads]
+        else:
+            w = list(p.tyreWear)
+            if all(50 < x <= 100.5 for x in w):
+                out["wear"] = [round(min(100.0, x), 2) for x in w]
+        return out
 
 
 # ---------------------------------------------------------------- modo demo
@@ -318,6 +365,10 @@ class DemoSource:
         self.btemp = [150.0] * 4
         self.last_real = time.time()
         self.sim_time = 0.0
+        self.tyre_age = 0          # voltas com o jogo de pneus atual (desgaste)
+        self.wet_tyres = False
+        self.water = 0.0           # água na pista 0..1
+        self.pitted = False
         self.curv = self._curvature()
         self._new_lap_plan()
 
@@ -349,18 +400,40 @@ class DemoSource:
                 self.mistakes[ci] = "push"   # sai de frente no meio da curva
             elif r < 0.63:
                 self.mistakes[ci] = "loose"  # traseira escapa na entrada
-        self.skill = random.uniform(0.95, 1.0)
+        self.skill = random.uniform(0.975, 1.0)
         self.profile = self._speed_profile()
         self.lap_valid = random.random() > 0.12
+
+    # chuva programada (minutos da corrida demo): previsão, garoa, chuva e pista secando
+    @staticmethod
+    def rain_at(m):
+        if 13 <= m < 22:
+            return 3
+        if 11 <= m < 13 or 22 <= m < 24:
+            return 1
+        return 0
+
+    def grip_status(self):
+        w = self.water
+        return 2 if w < 0.05 else 3 if w < 0.2 else 4 if w < 0.45 else 5 if w < 0.85 else 6
+
+    def grip(self):
+        wear = 1 - 0.0035 * self.tyre_age ** 1.15            # pneu perde aderência com as voltas
+        if self.wet_tyres:
+            wet = 0.86 + 0.06 * min(1.0, self.water / 0.4)    # de chuva: lento no seco, bom no molhado
+        else:
+            wet = 1 - 0.32 * self.water
+        return wear * wet
 
     def _speed_profile(self):
         n = self.n
         vmax = 72.0
         lim = [vmax] * n
+        gr = self.grip()
         for i in range(n):
             c = abs(self.curv[i])
             if c > 1e-4:
-                lim[i] = min(vmax, math.sqrt(1.65 * 9.81 / c) * self.skill)
+                lim[i] = min(vmax, math.sqrt(1.65 * 9.81 * gr / c) * self.skill)
         # erros: alteram a velocidade de ápice e o ponto de frenagem
         brake_dec = [13.5] * n
         for ci, kind in self.mistakes.items():
@@ -404,6 +477,8 @@ class DemoSource:
             self.s += self.v * h
             self.lap_t += h
             self.sim_time += h
+            r = self.rain_at(self.sim_time / 60)
+            self.water = max(0.0, min(1.0, self.water + h * (0.004 * r - (0.0025 if r == 0 else 0))))
             if self.s >= self.L:
                 self.s -= self.L
                 self.lap += 1
@@ -412,8 +487,13 @@ class DemoSource:
                     self.best_ms = self.last_ms
                 self.lap_t = 0.0
                 self.fuel -= 2.85
-                if self.fuel < 5:
+                self.tyre_age += 1
+                # parada no box: entra no fim da volta 11 e sai no começo da 12
+                if self.lap == 11 or self.fuel < 5:
                     self.fuel = 70.0
+                    self.tyre_age = 0
+                    self.pitted = True
+                    self.wet_tyres = self.water > 0.3 or self.rain_at(self.sim_time / 60 + 3) >= 2
                 self._new_lap_plan()
 
         i = int(self.s) % self.n
@@ -469,15 +549,30 @@ class DemoSource:
         t_in = [c + 9 for c in core]
         t_out = [c - 3 for c in core]
 
+        # demo: a linha muda com os erros (abre a curva, fecha demais), para o comparador de traçado
+        lane = 1.5 * math.sin(self.s / 260.0)
+        if ci is not None:
+            side = 1 if self.CORNERS[ci][2] > 0 else -1
+            if kind in ("early", "push") and -40 < dd < 60:
+                lane += 3.0 * math.cos(dd / 60 * math.pi / 2) * side
+            if kind == "late" and -20 < dd < 50:
+                lane -= 2.5 * math.cos((dd - 15) / 35 * math.pi / 2) * side
+        px = py = None
+        if self.field:
+            px, py = self.field.geo.at(self.s / self.L, lane)
         left = max(0, self.RACE_MS - int(self.sim_time * 1000))
+        in_pit = (self.lap == 10 and self.s > self.L - 250) or (self.lap == 11 and self.s < 250)
+        m = self.sim_time / 60
         if self.field:
             self.field.step(self.sim_time, self.lap + self.s / self.L, speed, left)
         return make_frame(
-            session_left_ms=left, total_laps=0, timed=True, pit_missing=1,
+            session_left_ms=left, total_laps=0, timed=True, pit_missing=0 if self.pitted else 1, x=px, y=py,
+            rain_now=self.rain_at(m), rain_10=self.rain_at(m + 10), rain_30=self.rain_at(m + 30),
+            grip_status=self.grip_status(), rain_tyres=self.wet_tyres,
             t=now, sim="demo", car="Demo GT3", track="Autódromo Demo", track_len=self.L, status=2,
             session=2, pos=self.s / self.L, lap=self.lap, cur_ms=int(self.lap_t * 1000),
             last_ms=self.last_ms, best_ms=self.best_ms, sector=min(2, int(self.s / self.L * 3)),
-            valid=self.lap_valid or self.s < self.L * 0.6, in_pit=False, speed=speed, gas=gas, brake=brake,
+            valid=self.lap_valid or self.s < self.L * 0.6, in_pit=in_pit, speed=speed, gas=gas, brake=brake,
             steer=max(-1, min(1, curv * 18)), gear=gear, rpm=rpm, max_rpm=8300, acc_lat=lat_g,
             acc_long=-brake * 1.4 + gas * 0.5, yaw=yaw, wheel_w=w, slip_angle=sa, pressure=pressure,
             core=list(core), t_in=t_in, t_mid=t_mid, t_out=t_out, brake_temp=list(self.btemp),

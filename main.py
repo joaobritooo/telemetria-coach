@@ -19,7 +19,7 @@ import threading
 import time
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 import analysis
 from analysis import Engine
@@ -152,11 +152,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = urlparse(self.path).path
-        if path in ("/", "/index.html"):
-            with open(os.path.join(RES_DIR, "web", "index.html"), "rb") as fh:
+        if path in ("/", "/index.html", "/icone.png", "/favicon.ico"):
+            name, ctype = ("index.html", "text/html; charset=utf-8") if path in ("/", "/index.html") else ("icone.png", "image/png")
+            with open(os.path.join(RES_DIR, "web", name), "rb") as fh:
                 data = fh.read()
             self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(data)))
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
@@ -185,6 +186,11 @@ class Handler(BaseHTTPRequestHandler):
             self._json(engine.map_payload())
         elif path == "/api/state":
             self._json(engine.snapshot())
+        elif path == "/api/history":
+            self._json(engine.history_payload())
+        elif path == "/api/compare":
+            q = parse_qs(urlparse(self.path).query)
+            self._json(engine.compare_payload(q.get("a", ["ref"])[0], q.get("b", ["last"])[0]))
         else:
             self.send_error(404)
 

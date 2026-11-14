@@ -206,6 +206,18 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError:
                 pass
             self._json({"ok": True})
+        elif urlparse(self.path).path == "/api/open":
+            # abre um vídeo no navegador padrão (só YouTube, para não virar abridor de links qualquer)
+            try:
+                n = int(self.headers.get("Content-Length", 0))
+                vid = str(json.loads(self.rfile.read(n) or b"{}").get("v", ""))
+            except ValueError:
+                vid = ""
+            if vid and len(vid) == 11 and all(ch.isalnum() or ch in "-_" for ch in vid):
+                webbrowser.open(f"https://www.youtube.com/watch?v={vid}")
+                self._json({"ok": True})
+            else:
+                self.send_error(400)
         elif urlparse(self.path).path == "/api/quit":
             self._json({"ok": True})
             threading.Timer(0.2, lambda: os._exit(0)).start()
@@ -410,7 +422,7 @@ def setup_logging():
 
 def main():
     ap = argparse.ArgumentParser(description="Telemetria Coach para ACC / Assetto Corsa")
-    ap.add_argument("--sim", choices=["acc", "ac"], help="força o simulador (padrão: autodetecta)")
+    ap.add_argument("--sim", choices=["acc", "ac", "evo"], help="força o simulador (padrão: autodetecta)")
     ap.add_argument("--demo", action="store_true", help="usa dados simulados")
     ap.add_argument("--demo-speed", type=float, default=1.0, help="acelera o tempo no modo demo")
     ap.add_argument("--port", type=int, default=8765)

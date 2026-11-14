@@ -69,6 +69,22 @@ CFG = {
     "wet_min_minutes": 3.0,               # menos que isso até o fim: não vale parar para trocar
 }
 
+HABIT_TOPIC = {"long_coasts": "acel", "early_gas": "acel", "locks": "freio", "spins": "acel", "entry_lifts": "freio",
+               "brk_releases": "freio", "steer_corrs": "equil"}
+
+
+def _topic_of(text):
+    """Tema da aula em vídeo que mais ajuda com um motivo de perda."""
+    t = text.lower()
+    if "frente" in t or "traseira" in t or "volante" in t:
+        return "equil"
+    if "freio" in t or "frenagem" in t or "travou" in t or "freou" in t:
+        return "freio"
+    if "acelera" in t or "patinou" in t or "rolou" in t or "saída" in t:
+        return "acel"
+    return "linha"
+
+
 RAIN_TXT = ["seco", "garoa", "chuva fraca", "chuva média", "chuva forte", "tempestade"]
 GRIP_TXT = ["verde", "rápida", "ótima", "escorregadia", "úmida", "molhada", "alagada"]
 HABITS = {
@@ -79,6 +95,8 @@ HABITS = {
     "locks": ("travamentos de roda", "pise forte no início da frenagem e vá soltando; se travar sempre, leve o brake bias para trás"),
     "spins": ("patinou na saída", "acelerador mais progressivo na saída ou +1 de TC"),
     "entry_lifts": ("tirou o pé antes de frear", "acelere até a placa e freie de uma vez"),
+    "brk_releases": ("soltou o freio de uma vez", "a velocidade da curva vem da TAXA de soltura do freio: vá aliviando enquanto vira"),
+    "steer_corrs": ("correções de volante no meio da curva", "entre um pouco mais devagar e com uma só entrada de volante; o volante consome velocidade"),
 }
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dados")
@@ -204,6 +222,58 @@ def pass_phases(d, c, bin_m):
     return out
 
 
+def technique(d, c, bin_m, ph):
+    """
+    Métricas de técnica numa passagem (comparadas depois com a sua melhor volta):
+    - release_s: tempo para soltar o freio de 50% do pico até zero (Ross Bentley: o que define a
+      velocidade é o momento e a TAXA de soltura do freio — trail braking).
+    - min_bin: onde ficou a velocidade mínima (ponto de ápice "real" na telemetria).
+    - full_bin: onde chegou ao acelerador 100% na saída ("quem chega primeiro ao acelerador total ganha").
+    - steer_corr: correções de volante no meio da curva; steer_apex: quanto volante no ápice
+      ("o volante consome velocidade": quanto mais esterça, mais o pneu esfrega).
+    - comb_g: aderência combinada média (círculo de aderência) entre começar a frear e o ápice.
+    """
+    t, sp, gas, brk, st, gg = d["t"], d["speed"], d["gas"], d["brake"], d.get("steer"), d.get("g")
+    b = lambda k: _v(brk, k) or 0.0
+    g = lambda k: _v(gas, k) or 0.0
+    n = len(sp)
+    out = {"release_s": None, "min_bin": None, "full_bin": None, "steer_corr": None, "steer_apex": None, "comb_g": None}
+    on, off = ph.get("brake_on"), ph.get("brake_off")
+    if on is not None and off is not None and off > on:
+        peak = max(b(k) for k in range(on, off))
+        if peak > 0.3:
+            k_half = max(k for k in range(on, off) if b(k) >= 0.5 * peak)
+            t0, t1 = _v(t, k_half), _v(t, min(n - 1, off))
+            if t0 is not None and t1 is not None and t1 >= t0:
+                out["release_s"] = (t1 - t0) / 1000
+    vals = [(_v(sp, k), k) for k in range(c.start, c.end + 1) if _v(sp, k) is not None]
+    if vals:
+        out["min_bin"] = min(vals)[1]
+    for k in range(c.apex, min(n, c.end + int(300 / bin_m))):
+        if g(k) >= 0.95:
+            out["full_bin"] = k
+            break
+    if st is not None:
+        seq = [abs(_v(st, k) or 0) for k in range(c.start, c.end + 1)]
+        if seq:
+            mx = max(seq)
+            thr = max(0.01, 0.08 * mx)
+            ext, up, rev = seq[0], True, 0
+            for v in seq[1:]:
+                if up and v > ext or not up and v < ext:
+                    ext = v
+                elif abs(v - ext) > thr:
+                    rev += 1
+                    up, ext = not up, v
+            out["steer_corr"] = max(0, rev - 1)  # curva normal: vira e desvira = 1 inversão
+            out["steer_apex"] = abs(_v(st, c.apex) or 0)
+    if gg is not None and on is not None and c.apex > on:
+        seg = [_v(gg, k) for k in range(on, c.apex + 1) if _v(gg, k) is not None]
+        if seg:
+            out["comb_g"] = sum(seg) / len(seg)
+    return out
+
+
 def brake_stats(d, c, bin_m):
     """Ponto de frenagem, pico de pressão e tempo até o pico numa passagem."""
     br, t = d["brake"], d["t"]
@@ -242,6 +312,7 @@ class Lap:
         self.steer = [None] * n
         self.x = [None] * n
         self.y = [None] * n
+        self.g = [None] * n
         self.valid = True
         self.pit = False
         self.fuel_start = fuel
@@ -262,13 +333,14 @@ class Lap:
         self.steer[b] = f["steer"]
         if f["x"] is not None:
             self.x[b], self.y[b] = f["x"], f["y"]
+        self.g[b] = math.hypot(f["acc_lat"], f["acc_long"])
         if f["abs_active"]:
             self.abs_bins.add(b)
         if f["tc_active"]:
             self.tc_bins.add(b)
 
     def arrays(self):
-        return {"t": self.t, "speed": self.speed, "gas": self.gas, "brake": self.brake, "steer": self.steer}
+        return {"t": self.t, "speed": self.speed, "gas": self.gas, "brake": self.brake, "steer": self.steer, "g": self.g}
 
     def coverage(self):
         return sum(v is not None for v in self.speed) / self.n
@@ -287,6 +359,8 @@ class Lap:
         # posição: opcional (nem todo jogo/sessão informa); só guarda se cobriu quase a volta toda
         if sum(v is not None for v in self.x) > self.n * 0.8:
             arrays["x"], arrays["y"] = _fill(self.x), _fill(self.y)
+        if sum(v is not None for v in self.g) > self.n * 0.8:
+            arrays["g"] = [round(v, 3) for v in _fill(self.g)]
         return arrays
 
     def count(self, kind, b0, b1):
@@ -305,6 +379,7 @@ class Corner:
         self.ref_brake_kmh = ref["speed"][brake_bin] if brake_bin is not None else None
         self.kind = corner_class(self.ref_min)
         self.ref_ph = pass_phases(ref, self, bin_m)
+        self.ref_tech = technique(ref, self, bin_m, self.ref_ph)
         self.ref_brake = brake_stats(ref, self, bin_m) if brake_bin is not None else None
         self.history = deque(maxlen=6)
         self.last = None
@@ -413,6 +488,12 @@ class Engine:
         self.spot = ""
         self.spot_clear_t = 0.0
         self.map_saved_version = -1
+        # traçado da pista montado pela posição do SEU carro (funciona no AC e no ACC sem broadcast)
+        self.own_n = 800
+        self.own_map = [None] * self.own_n
+        self.own_ver = 0
+        self.own_dirty = 0
+        self.own_saved = -1
         self.stint = 1
         self.stint_wet = None
         self.weather = None
@@ -427,6 +508,7 @@ class Engine:
         self.was_in_pit = False
         self.session_started = time.strftime("%Y%m%d_%H%M%S")
         if f:
+            self._load_own_map()
             self._load_ref()
             self._load_pit_loss()
             self._load_map()
@@ -512,10 +594,73 @@ class Engine:
                 self.spot = ""
                 self.spot_clear_t = 0.0
 
+
+    # ------------------------------------------------------------ traçado próprio (posição do seu carro)
+    def _own_path(self):
+        return os.path.join(DATA_DIR, "mapas", f"{slug(self.sim)}__{slug(self.track)}__linha.json")
+
+    def _load_own_map(self):
+        try:
+            with open(self._own_path(), encoding="utf-8") as fh:
+                pts = json.load(fh)["pts"]
+            if len(pts) == self.own_n:
+                self.own_map = [tuple(p) if p else None for p in pts]
+                self.own_ver += 1
+        except (OSError, ValueError, KeyError):
+            pass
+        self.own_saved = self.own_ver
+
+    def _own_add(self, frac, x, y):
+        k = int(frac * self.own_n) % self.own_n
+        cur = self.own_map[k]
+        self.own_map[k] = (x, y) if cur is None else (cur[0] * 0.8 + x * 0.2, cur[1] * 0.8 + y * 0.2)
+        self.own_dirty += 1
+        if self.own_dirty >= 300 or cur is None and self.own_dirty >= 60:
+            self.own_dirty = 0
+            self.own_ver += 1
+
+    def own_coverage(self):
+        return sum(1 for p in self.own_map if p) / self.own_n
+
+    def _save_own_map(self):
+        if self.own_ver == self.own_saved or self.own_coverage() < 0.9:
+            return
+        try:
+            os.makedirs(os.path.dirname(self._own_path()), exist_ok=True)
+            with open(self._own_path(), "w", encoding="utf-8") as fh:
+                json.dump({"pts": [[round(p[0], 1), round(p[1], 1)] if p else None for p in self.own_map]}, fh)
+            self.own_saved = self.own_ver
+        except OSError:
+            pass
+
+    def _own_xy(self, fracs):
+        """Posição aproximada (linha média da pista) para voltas gravadas sem posição."""
+        pts = self.own_map
+        idx = [i for i, p in enumerate(pts) if p]
+        if len(idx) < self.own_n * 0.9:
+            return None
+        xs, ys = [], []
+        n = self.own_n
+        for fr in fracs:
+            k = fr * n
+            i0 = int(k) % n
+            a = next(pts[(i0 - d) % n] for d in range(n) if pts[(i0 - d) % n])
+            b = next(pts[(i0 + 1 + d) % n] for d in range(n) if pts[(i0 + 1 + d) % n])
+            t = k - int(k)
+            xs.append(round(a[0] + (b[0] - a[0]) * t, 1))
+            ys.append(round(a[1] + (b[1] - a[1]) * t, 1))
+        return xs, ys
+
+    def _use_own_map(self):
+        tr = self.tracker
+        return self.sim == "ac" or not tr or not tr.cars
+
     def map_payload(self):
         tr = self.tracker
-        if not tr:
-            return {"version": 0, "pts": []}
+        if self._use_own_map():
+            with self.lock:
+                return {"version": 100000 + self.own_ver, "own": True,
+                        "pts": [[round(p[0], 1), round(p[1], 1)] if p else None for p in self.own_map]}
         with tr.lock:
             return {"version": tr.map_version, "pts": [[round(p[0], 1), round(p[1], 1)] if p else None for p in tr.map_bins]}
 
@@ -599,6 +744,8 @@ class Engine:
             self._opponent_events(f)
             self._spotter(f)
             self._weather(f)
+            if f["x"] is not None and f["speed"] > 20 and not f["in_pit"]:
+                self._own_add(f["pos"], f["x"], f["y"])
             if f["in_pit"] and not self.was_in_pit:
                 self._pit_report()
             self.was_in_pit = f["in_pit"]
@@ -640,6 +787,8 @@ class Engine:
                    "long_coasts": sum(1 for _, k in lap.events if k == "long_coast"),
                    "early_gas": sum(1 for _, k in lap.events if k == "early_gas"),
                    "entry_lifts": sum(1 for _, k in lap.events if k == "entry_lift"),
+                   "brk_releases": sum(1 for _, k in lap.events if k == "brk_release"),
+                   "steer_corrs": sum(1 for _, k in lap.events if k == "steer_corr"),
                    "coast_s": round(lap.coast_s, 1), "sectors": sectors if len(sectors) > 1 else [],
                    "stint": self.stint, "fuel_start": round(lap.fuel_start or 0, 2),
                    "rain": f["rain_now"], "grip": f["grip_status"], "wet": f["rain_tyres"],
@@ -671,6 +820,7 @@ class Engine:
             self._race_lap_messages(f)
             self._tyre_messages(f)
             self._save_map()
+            self._save_own_map()
         self._start_lap(f, b)
 
     def _lap_summary(self, rec, lap, ms, prev, best):
@@ -923,6 +1073,7 @@ class Engine:
         g = lap.gear[c.apex]
         if g is not None and c.ref_gear and g != c.ref_gear and dt > 0.05:
             reasons.append((1, f"referência usou {c.ref_gear}ª, você {g}ª"))
+        reasons += self._technique_reasons(c, lap, ph, d_min, d_exit, dt)
         reasons.sort(key=lambda r: -r[0])
         top = [r[1] for r in reasons[:2]]
         sk = self._seg_key(c)
@@ -945,6 +1096,44 @@ class Engine:
             lvl = "bad" if dt > 0.2 else "warn"
             why = top[0] if top else "linha/velocidade diferente da referência"
             self.say(lvl, "curva", f"T{c.id}: +{dt:.2f}s — {why}")
+
+
+    def _technique_reasons(self, c, lap, ph, d_min, d_exit, dt):
+        """Regras de técnica (Bentley / círculo de aderência / análise de telemetria), sempre vs. a sua melhor."""
+        cur, ref = technique(lap.arrays(), c, self.bin_m, ph), c.ref_tech
+        out = []
+        if not ref:
+            return out
+        r0, r1 = cur["release_s"], ref["release_s"]
+        if r0 is not None and r1 is not None and c.kind != "rapida" and r0 < 0.12 and r1 >= 0.25 and (d_min < -2 or dt > 0.08):
+            out.append((2.1, f"soltou o freio de uma vez ({r0:.2f}s; {r1:.2f}s na sua melhor) — vá aliviando o pedal enquanto "
+                             "vira: o peso fica na frente e o carro aponta melhor"))
+            lap.events.append((c.apex, "brk_release"))
+        if cur["min_bin"] is not None and ref["min_bin"] is not None and d_exit < -3:
+            dm = (cur["min_bin"] - ref["min_bin"]) * self.bin_m
+            if dm < -15:
+                out.append((1.9, f"velocidade mínima {-dm:.0f} m antes da sua melhor — virou cedo (ápice adiantado) e a saída "
+                                 "fechou; vire um pouco mais tarde para abrir a saída"))
+            elif dm > 15:
+                out.append((1.9, f"velocidade mínima {dm:.0f} m depois da sua melhor — levou o freio longe demais e atrasou o "
+                                 "acelerador; solte o freio antes e gire o carro mais cedo"))
+        if cur["full_bin"] is not None and ref["full_bin"] is not None and d_exit < -2:
+            df = (cur["full_bin"] - ref["full_bin"]) * self.bin_m
+            if df > 25:
+                out.append((1.8, f"acelerador 100% {df:.0f} m depois da sua melhor — quem chega primeiro ao acelerador "
+                                 "total ganha a reta; abra o volante para poder pisar fundo"))
+        if cur["steer_corr"] is not None and ref["steer_corr"] is not None and cur["steer_corr"] - ref["steer_corr"] >= 2 and dt > 0.05:
+            out.append((1.7, f"{cur['steer_corr']} correções de volante no meio da curva ({ref['steer_corr']} na sua melhor) — "
+                             "carro no limite ou entrada rápida demais; uma entrada mais limpa rende mais"))
+            lap.events.append((c.apex, "steer_corr"))
+        elif cur["steer_apex"] and ref["steer_apex"] and cur["steer_apex"] > ref["steer_apex"] * 1.15 + 0.01 and d_min < -2:
+            out.append((1.6, "mais volante que na sua melhor no ápice — esterçar demais esfrega o pneu e consome velocidade; "
+                             "deixe o carro girar na entrada (freio) em vez de forçar o volante"))
+        if cur["comb_g"] and ref["comb_g"] and cur["comb_g"] < ref["comb_g"] * 0.85 and dt > 0.05:
+            pct = cur["comb_g"] / ref["comb_g"] * 100
+            out.append((1.9, f"na transição freio→curva usou só {pct:.0f}% da aderência da sua melhor — troque freio por "
+                             "volante aos poucos (trail braking) em vez de frear, soltar e só depois virar"))
+        return out
 
     # ------------------------------------------------------------ equilíbrio e pneus
     def _balance(self, f):
@@ -1155,11 +1344,12 @@ class Engine:
                 if avg > 0.08:
                     rh = self.reason_hist.get(self._seg_key(c), {})
                     why = max(rh.values(), key=lambda x: x[0])[1] if rh else "compare linha e velocidade de ápice com a referência"
-                    items.append({"score": avg * n, "title": f"T{c.id}: perde {avg:.2f}s em média", "text": why})
+                    items.append({"score": avg * n, "title": f"T{c.id}: perde {avg:.2f}s em média", "text": why, "topic": _topic_of(why)})
         for k, (name, tip) in HABITS.items():
             tot = sum(l.get(k, 0) for l in green)
             if tot / n >= 0.6:
-                items.append({"score": tot * 0.06, "title": f"Hábito: {name} ({tot / n:.1f} por volta)", "text": tip})
+                items.append({"score": tot * 0.06, "title": f"Hábito: {name} ({tot / n:.1f} por volta)", "text": tip,
+                              "topic": HABIT_TOPIC.get(k, "fund")})
         valid = [l["ms"] / 1000 for l in green if l["valid"]]
         if len(valid) >= 4:
             best = min(valid)
@@ -1167,7 +1357,8 @@ class Engine:
             sd = statistics.pstdev(clean) if len(clean) >= 3 else 0
             if sd > 0.5:
                 items.append({"score": sd * n * 0.5, "title": f"Consistência: suas voltas variam ±{sd:.2f}s",
-                              "text": "faça séries de 5 voltas a ~98% repetindo os mesmos pontos de freio antes de atacar"})
+                              "text": "faça séries de 5 voltas a ~98% repetindo os mesmos pontos de freio antes de atacar",
+                              "topic": "fund"})
         items.sort(key=lambda x: -x["score"])
         if not items:
             return [{"score": 0, "title": "Sessão limpa ✓", "text": "Sem pontos fracos claros. Ataque os pontos de frenagem para baixar o tempo."}]
@@ -1246,6 +1437,11 @@ class Engine:
         if arrays.get("x"):
             out["x"] = [round(v, 1) for v in arrays["x"][::step]]
             out["y"] = [round(v, 1) for v in arrays["y"][::step]]
+        else:
+            est = self._own_xy([i / self.n for i in range(0, self.n, step)])
+            if est:
+                out["x"], out["y"] = est
+                out["xy_est"] = True
         return out
 
     def compare_payload(self, a="ref", b="last"):
@@ -1441,8 +1637,15 @@ class Engine:
 
     def _race_view(self):
         tr = self.tracker
-        if not tr or self.sim == "ac":
-            return {"available": False, "status": "Oponentes em tempo real só no ACC (o AC não expõe os outros carros)."}
+        if self._use_own_map():
+            f = self.last_frame
+            status = ("Oponentes em tempo real só no ACC (o AC não expõe os outros carros)." if self.sim == "ac" or not tr
+                      else tr.status or "Aguardando dados dos rivais (broadcast do ACC).")
+            me = [{"num": 0, "x": round(f["x"], 1), "y": round(f["y"], 1), "me": True, "pit": f["in_pit"], "near": False, "pos": 0}] \
+                if f and f["x"] is not None else []
+            return {"available": False, "status": status, "map_version": 100000 + self.own_ver,
+                    "mirror": bool(tr and tr.mirror), "cars_xy": me, "own_map": True,
+                    "map_cov": round(self.own_coverage(), 2)}
         with tr.lock:
             cars = tr.standings()
             me = tr.cars.get(tr.player)

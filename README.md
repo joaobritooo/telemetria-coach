@@ -1,6 +1,6 @@
 # Telemetria Coach
 
-Painel de telemetria em tempo real para **Assetto Corsa Competizione** e **Assetto Corsa**, feito para o monitor secundário. Traz coach de pilotagem por voz, dicas de setup, rivais ao vivo, estratégia de pit e combustível, chuva e desgaste de pneus, spotter, mapa da pista e a evolução do piloto entre sessões.
+Painel de telemetria em tempo real para **Assetto Corsa Competizione**, **Assetto Corsa** e **Assetto Corsa EVO**, feito para o monitor secundário. Traz coach de pilotagem por voz, dicas de setup, rivais ao vivo, estratégia de pit e combustível, chuva e desgaste de pneus, spotter, mapa da pista, a evolução do piloto entre sessões e aulas de pilotagem em vídeo.
 
 ## ⬇️ Download
 
@@ -8,7 +8,7 @@ Painel de telemetria em tempo real para **Assetto Corsa Competizione** e **Asset
 
 1. Baixe o `.exe` e coloque numa pasta só dele, porque o app cria uma pasta `dados` ao lado.
 2. Dê dois cliques. Se o Windows SmartScreen avisar, clique em *Mais informações → Executar assim mesmo*. O app não é assinado digitalmente.
-3. Abra o ACC ou o AC e entre na pista. O painel abre sozinho no monitor secundário.
+3. Abra o ACC, o AC ou o AC EVO e entre na pista. O painel abre sozinho no monitor secundário.
 
 Para testar sem o jogo, crie um atalho do `.exe` e acrescente `--demo` no campo *Destino*.
 

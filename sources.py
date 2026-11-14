@@ -179,10 +179,13 @@ def running_processes():
 
 ACC_EXE = {"ac2-win64-shipping.exe"}
 AC_EXE = {"acs.exe", "acs_x86.exe"}
+EVO_EXE = {"assettocorsaevo.exe"}
 
 
 def detect_sim():
     procs = running_processes()
+    if procs & EVO_EXE:
+        return "evo"
     if procs & ACC_EXE:
         return "acc"
     if procs & AC_EXE:
@@ -216,7 +219,7 @@ def make_frame(**kw):
 
 
 class SharedMemorySource:
-    """Lê ACC ou AC via shared memory. sim: 'acc', 'ac' ou None (autodetecta)."""
+    """Lê ACC, AC ou AC EVO via shared memory. sim: 'acc', 'ac', 'evo' ou None (autodetecta)."""
 
     def __init__(self, sim=None):
         self.forced = sim
@@ -236,6 +239,8 @@ class SharedMemorySource:
             self.sim = detect_sim()
             if self.sim is None:
                 return False
+        pre = "Local\\acevo_pmf_" if self.sim == "evo" else "Local\\acpmf_"
+        self.phys, self.gfx, self.stat = SharedMem(pre + "physics"), SharedMem(pre + "graphics"), SharedMem(pre + "static")
         if self.phys.open() and self.gfx.open() and self.stat.open():
             self.opened = True
             self.last_packet_change = time.time()
@@ -259,6 +264,18 @@ class SharedMemorySource:
             if not self._open():
                 return None
         p = self.phys.read(Physics)
+        if self.sim == "evo":
+            g = self.gfx.read(GraphicsEVO)
+            if self.static is None or now - self.static_read_at > 5:
+                self.static = self.stat.read(StaticEVO)
+                self.static_read_at = now
+            if p.packetId != self.last_packet:
+                self.last_packet = p.packetId
+                self.last_packet_change = now
+            elif now - self.last_packet_change > 5 and g.status == 0:
+                self._close()
+                return None
+            return evo_frame(p, g, self.static)
         g = self.gfx.read(GraphicsACC if self.sim == "acc" else GraphicsAC)
         if self.static is None or now - self.static_read_at > 5:
             self.static = self.stat.read(Static)
@@ -580,3 +597,178 @@ class DemoSource:
             tc_level=3, abs_level=2, tc_active=kind == "spin" and gas > 0.4 and 15 < dd < 70,
             abs_active=brake > 0.7, bias=0.565, compound="dry_compound", air=24, road=31,
         )
+
+
+# ---------------------------------------------------------------- Assetto Corsa EVO
+# Mapeamentos próprios (Local\acevo_pmf_*). Física = mesmo layout do AC/ACC (800 bytes).
+# Gráficos/estático: layout novo (SPageFileGraphicEvo / SPageFileStaticEvo, #pragma pack(4)).
+# Fonte: definição da comunidade (dSyncro/acevo-shared-memory, albertowd/live-telemetry-evo).
+c_b = ctypes.c_bool
+c_i8 = ctypes.c_int8
+c_u8 = ctypes.c_uint8
+c_u32 = ctypes.c_uint32
+c_u64 = ctypes.c_uint64
+c_sh = ctypes.c_short
+
+
+def C(n):
+    return ctypes.c_char * n
+
+
+class EvoTyre(ctypes.Structure):
+    _pack_ = 4
+    _fields_ = [("slip", c_f), ("lock", c_b), ("pressure", c_f), ("temp_c", c_f), ("brake_temp_c", c_f),
+                ("brake_pressure", c_f), ("temp_left", c_f), ("temp_center", c_f), ("temp_right", c_f),
+                ("compound_front", C(33)), ("compound_rear", C(33)), ("norm_pressure", c_f),
+                ("norm_temp_left", c_f), ("norm_temp_center", c_f), ("norm_temp_right", c_f),
+                ("norm_brake_temp", c_f), ("norm_temp_core", c_f), ("ph", C(128))]
+
+
+class EvoDamage(ctypes.Structure):
+    _pack_ = 4
+    _fields_ = [(n, c_f) for n in ("front", "rear", "left", "right", "center", "s_lf", "s_rf", "s_lr", "s_rr")] + [("ph", C(92))]
+
+
+class EvoPit(ctypes.Structure):
+    _pack_ = 4
+    _fields_ = [(n, c_i8) for n in ("damage", "fuel", "lf", "rf", "lr", "rr")] + [("ph", C(58))]
+
+
+class EvoInstr(ctypes.Structure):
+    _pack_ = 4
+    _fields_ = [("main_light", c_i8), ("special_light", c_i8), ("cockpit_light", c_i8), ("wiper", c_i8),
+                ("rain_lights", c_b), ("dir_left", c_b), ("dir_right", c_b), ("flashing", c_b), ("warning", c_b),
+                ("display_index", c_i8), ("display_pages", c_i8 * 16), ("headlights", c_b), ("ph", C(101))]
+
+
+class EvoElec(ctypes.Structure):
+    _pack_ = 4
+    _fields_ = [("tc_level", c_i8), ("tc_cut_level", c_i8), ("abs_level", c_i8), ("esc_level", c_i8), ("ebb_level", c_i8),
+                ("brake_bias", c_f), ("engine_map", c_i8), ("turbo_level", c_f), ("ers_deploy", c_i8), ("ers_recharge", c_f),
+                ("ers_heat", c_b), ("ers_overtake", c_b), ("drs_open", c_b), ("diff_power", c_i8), ("diff_coast", c_i8),
+                ("f_bump", c_i8), ("f_rebound", c_i8), ("r_bump", c_i8), ("r_rebound", c_i8), ("ignition", c_b),
+                ("pitlimiter", c_b), ("perf_mode", c_i8), ("ph", C(88))]
+
+
+class EvoSession(ctypes.Structure):
+    _pack_ = 4
+    _fields_ = [("phase_name", C(33)), ("time_left", C(15)), ("time_left_ms", c_i), ("wait_time", C(15)),
+                ("total_lap", c_i), ("current_lap", c_i), ("lights_on", c_i), ("lights_mode", c_i),
+                ("lap_length_km", c_f), ("end_session_flag", c_i), ("time_to_next", C(15)), ("disconnected", c_b),
+                ("restart_enabled", c_b), ("ui_drive", c_b), ("ui_setup", c_b), ("ready_blink", c_b),
+                ("waiting_players", c_b), ("ph", C(140))]
+
+
+class EvoTiming(ctypes.Structure):
+    _pack_ = 4
+    _fields_ = [("current", C(15)), ("delta_current", C(15)), ("delta_current_p", c_i), ("last", C(15)),
+                ("delta_last", C(15)), ("delta_last_p", c_i), ("best", C(15)), ("ideal", C(15)), ("total", C(15)),
+                ("is_invalid", c_b), ("ph", C(137))]
+
+
+class EvoAssists(ctypes.Structure):
+    _pack_ = 4
+    _fields_ = [(n, c_u8) for n in ("auto_gear", "auto_blip", "auto_clutch", "auto_clutch_start", "e_start",
+                                     "auto_pit_limiter", "standing_start")] + [("auto_steer", c_f), ("stability", c_f), ("ph", C(48))]
+
+
+class GraphicsEVO(ctypes.Structure):
+    _pack_ = 4
+    _fields_ = [
+        ("packetId", c_i), ("status", c_i), ("focused_a", c_u64), ("focused_b", c_u64),
+        ("player_a", c_u64), ("player_b", c_u64), ("rpm", ctypes.c_ushort),
+        ("is_rpm_limiter_on", c_b), ("is_change_up_rpm", c_b), ("is_change_down_rpm", c_b), ("tc_active", c_b),
+        ("abs_active", c_b), ("esc_active", c_b), ("launch_active", c_b), ("is_ignition_on", c_b),
+        ("is_engine_running", c_b), ("kers_is_charging", c_b), ("is_wrong_way", c_b), ("is_drs_available", c_b),
+        ("battery_is_charging", c_b), ("max_kj_reached", c_b), ("max_charge_kj_reached", c_b),
+        ("display_speed_kmh", c_sh), ("display_speed_mph", c_sh), ("display_speed_ms", c_sh),
+        ("pitspeeding_delta", c_f), ("gear_int", c_sh), ("rpm_percent", c_f), ("gas_percent", c_f),
+        ("brake_percent", c_f), ("handbrake_percent", c_f), ("clutch_percent", c_f), ("steering_percent", c_f),
+        ("ffb_strength", c_f), ("car_ffb_mult", c_f), ("water_temp_percent", c_f), ("water_pressure_bar", c_f),
+        ("fuel_pressure_bar", c_f), ("water_temp_c", c_i8), ("air_temp_c", c_i8), ("oil_temp_c", c_f),
+        ("oil_pressure_bar", c_f), ("exhaust_temp_c", c_f), ("g_x", c_f), ("g_y", c_f), ("g_z", c_f),
+        ("turbo_boost", c_f), ("turbo_boost_level", c_f), ("turbo_boost_perc", c_f), ("steer_degrees", c_i),
+        ("current_km", c_f), ("total_km", c_u32), ("total_driving_time_s", c_u32), ("tod_h", c_i), ("tod_m", c_i),
+        ("tod_s", c_i), ("delta_time_ms", c_i), ("current_lap_time_ms", c_i), ("predicted_lap_time_ms", c_i),
+        ("fuel_l", c_f), ("fuel_l_percent", c_f), ("fuel_l_per_km", c_f), ("km_per_fuel_l", c_f),
+        ("current_torque", c_f), ("current_bhp", c_i),
+        ("tyre_lf", EvoTyre), ("tyre_rf", EvoTyre), ("tyre_lr", EvoTyre), ("tyre_rr", EvoTyre),
+        ("npos", c_f), ("kers_charge_perc", c_f), ("kers_current_perc", c_f), ("control_lock_time", c_f),
+        ("car_damage", EvoDamage), ("car_location", c_i), ("pit_info", EvoPit), ("fuel_l_used", c_f),
+        ("fuel_l_per_lap", c_f), ("laps_possible_with_fuel", c_f), ("battery_temp", c_f), ("battery_voltage", c_f),
+        ("inst_fuel_l_per_km", c_f), ("inst_km_per_fuel_l", c_f), ("gear_rpm_window", c_f),
+        ("instr", EvoInstr), ("instr_min", EvoInstr), ("instr_max", EvoInstr),
+        ("elec", EvoElec), ("elec_min", EvoElec), ("elec_max", EvoElec), ("elec_mod", EvoElec),
+        ("total_lap_count", c_i), ("current_pos", c_u32), ("total_drivers", c_u32), ("last_laptime_ms", c_i),
+        ("best_laptime_ms", c_i), ("flag", c_i), ("global_flag", c_i), ("max_gears", c_u32), ("engine_type", c_i),
+        ("has_kers", c_b), ("is_last_lap", c_b), ("performance_mode_name", C(33)), ("diff_coast_raw", c_f),
+        ("diff_power_raw", c_f), ("race_cut_gained_ms", c_i), ("distance_to_deadline", c_i),
+        ("race_cut_delta", c_f), ("session_state", EvoSession), ("timing_state", EvoTiming),
+        ("player_ping", c_i), ("player_latency", c_i), ("cpu", c_i), ("cpu_avg", c_i), ("qos", c_i),
+        ("qos_avg", c_i), ("fps", c_i), ("fps_avg", c_i), ("driver_name", C(33)), ("driver_surname", C(33)),
+        ("car_model", C(33)), ("is_in_pit_box", c_b), ("is_in_pit_lane", c_b), ("is_valid_lap", c_b),
+        ("car_coordinates", c_f * 180), ("gap_ahead", c_f), ("gap_behind", c_f), ("active_cars", c_u8),
+        ("fuel_per_lap", c_f), ("fuel_estimated_laps", c_f), ("assists", EvoAssists), ("max_fuel", c_f),
+        ("max_turbo_boost", c_f), ("use_single_compound", c_b), ("car_ids", c_u64 * 120),
+    ]
+
+
+class StaticEVO(ctypes.Structure):
+    _pack_ = 4
+    _fields_ = [("sm_version", C(15)), ("ac_evo_version", C(15)), ("session", c_i), ("session_name", C(33)),
+                ("event_id", c_u8), ("session_id", c_u8), ("starting_grip", c_i), ("start_ambient_c", c_f),
+                ("start_ground_c", c_f), ("is_static_weather", c_b), ("is_timed_race", c_b), ("is_online", c_b),
+                ("number_of_sessions", c_i), ("nation", C(33)), ("longitude", c_f), ("latitude", c_f),
+                ("track", C(33)), ("track_configuration", C(33)), ("track_length_m", c_f)]
+
+
+for _cls, _size in ((EvoTyre, 256), (EvoDamage, 128), (EvoPit, 64), (EvoElec, 128), (EvoInstr, 128),
+                    (EvoSession, 256), (EvoTiming, 256), (EvoAssists, 64), (StaticEVO, 208)):
+    assert ctypes.sizeof(_cls) == _size, (_cls.__name__, ctypes.sizeof(_cls), _size)
+
+
+def _s(b):
+    return b.decode("utf-8", "ignore").strip("\x00 ") if isinstance(b, bytes) else str(b)
+
+
+def evo_frame(p, g, s):
+    """Frame normalizado a partir da shared memory do AC EVO."""
+    tyres = (g.tyre_lf, g.tyre_rf, g.tyre_lr, g.tyre_rr)
+    core = list(p.tyreCoreTemperature) if any(p.tyreCoreTemperature) else [t.temp_c for t in tyres]
+    pressure = list(p.wheelsPressure) if any(p.wheelsPressure) else [t.pressure for t in tyres]
+    btemp = list(p.brakeTemp) if any(p.brakeTemp) else [t.brake_temp_c for t in tyres]
+    # interno/externo: no pneu esquerdo o lado interno é o direito, e vice-versa
+    t_in = [tyres[k].temp_right if k % 2 == 0 else tyres[k].temp_left for k in range(4)]
+    t_out = [tyres[k].temp_left if k % 2 == 0 else tyres[k].temp_right for k in range(4)]
+    t_mid = [t.temp_center for t in tyres]
+    xy = {}
+    n = min(60, g.active_cars or 60)
+    idx = next((i for i in range(n) if g.car_ids[i * 2] == g.player_a and g.car_ids[i * 2 + 1] == g.player_b), None)
+    if idx is None and g.active_cars <= 1:
+        idx = 0
+    if idx is not None:
+        x, z = g.car_coordinates[idx * 3], g.car_coordinates[idx * 3 + 2]
+        if not (x == 0 and z == 0) and abs(x) < 1e5 and abs(z) < 1e5:
+            xy = {"x": round(x, 2), "y": round(z, 2)}
+    bias = g.elec.brake_bias or p.brakeBias
+    if bias > 1.5:
+        bias /= 100.0
+    track = (_s(s.track) + (" " + _s(s.track_configuration) if _s(s.track_configuration) else "")).strip()
+    tl = g.session_state.time_left_ms
+    return make_frame(
+        t=time.time(), sim="evo", car=_s(g.car_model), track=track, track_len=s.track_length_m or g.session_state.lap_length_km * 1000,
+        status=g.status, session=2 if s.session == 1 else 0,
+        pos=g.npos, lap=max(0, g.total_lap_count), cur_ms=max(0, g.current_lap_time_ms), last_ms=max(0, g.last_laptime_ms),
+        best_ms=max(0, g.best_laptime_ms), sector=0, valid=bool(g.is_valid_lap) and not g.timing_state.is_invalid,
+        in_pit=bool(g.is_in_pit_box or g.is_in_pit_lane),
+        speed=p.speedKmh, gas=p.gas, brake=p.brake, steer=p.steerAngle, gear=p.gear - 1, rpm=p.rpms,
+        max_rpm=p.currentMaxRpm or 8000, clutch=p.clutch, acc_lat=p.accG[0], acc_long=p.accG[2], yaw=p.localAngularVel[1],
+        wheel_w=list(p.wheelAngularSpeed), slip_angle=list(p.slipAngle), slip_ratio=list(p.slipRatio),
+        pressure=pressure, core=core, t_in=t_in, t_mid=t_mid, t_out=t_out, brake_temp=btemp,
+        fuel=g.fuel_l or p.fuel, max_fuel=g.max_fuel, tyres_out=p.numberOfTyresOut,
+        tc_level=g.elec.tc_level, abs_level=g.elec.abs_level, tc_active=bool(p.tcinAction or g.tc_active),
+        abs_active=bool(p.absInAction or g.abs_active), bias=bias, compound=_s(g.tyre_lf.compound_front),
+        air=p.airTemp, road=p.roadTemp, session_left_ms=max(0, tl) if 0 < tl < 1e9 else 0,
+        total_laps=max(0, g.session_state.total_lap), timed=bool(s.is_timed_race) or g.session_state.total_lap <= 0,
+        **xy,
+    )

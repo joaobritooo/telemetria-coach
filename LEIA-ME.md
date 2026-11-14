@@ -1,4 +1,4 @@
-# Telemetria Coach — ACC e Assetto Corsa
+# Telemetria Coach — ACC, Assetto Corsa e AC EVO
 
 Painel de telemetria em tempo real para o monitor secundário, com coach de pilotagem e dicas de setup.
 Pelo código-fonte, só precisa do `pywebview` (`pip install -r requirements.txt`). O .exe não precisa de nada.
@@ -48,6 +48,20 @@ material de coaching real (botão **📚 Conceitos e fontes** no painel):
 - Acelerar antes de poder abrir o volante e ter que aliviar = alerta (erro mais comum segundo os coaches).
 - Tirar o pé antes de frear = alerta, exceto quando o app está em **modo economia** (lift & coast).
 
+Técnicas medidas a cada curva, sempre comparando com a sua melhor volta (fontes no botão 📚):
+
+- **Soltar o freio de uma vez** em vez de ir aliviando enquanto vira (Ross Bentley: a taxa de soltura do freio define a curva).
+- **Ponto de velocidade mínima** adiantado (virou cedo) ou atrasado (freio longe demais, acelerador atrasado).
+- **Acelerador 100% tarde** na saída: quem chega primeiro ao acelerador total ganha a reta.
+- **Correções de volante / volante demais no ápice**: o volante consome velocidade.
+- **Círculo de aderência**: pouca aderência usada na transição freio → curva (frear, soltar e só depois virar).
+
+## Aulas (aba 🎓)
+
+Vídeos de pilotagem por tema (fundamentos, traçado, frenagem, acelerador, sub/sobresterço, chuva, ACC), com player
+no próprio painel. Os temas que o relatório da sessão aponta aparecem em **⭐ Para você**. Vídeos em inglês: ⚙ →
+Legendas → Traduzir automaticamente → Português.
+
 ## Corrida (aba 🏁)
 
 - **Rivais em tempo real (ACC):** classificação, gap para você, ritmo de cada um, quem está no box.
@@ -79,7 +93,8 @@ material de coaching real (botão **📚 Conceitos e fontes** no painel):
     marcha, acelerador, freio e a diferença acumulada.
   - **Mini-setores:** a volta dividida em 10 trechos iguais com o ganho/perda de cada um; clique para dar zoom.
   - Também: velocidade sobreposta, diferença de tempo ao longo da volta, pedais e ganho/perda por curva.
-  - O traçado precisa da posição do carro, gravada nas voltas feitas a partir da versão 1.1.
+  - O traçado usa a posição do carro gravada em cada volta. Voltas antigas (sem posição) usam o desenho médio da pista.
+- **Mapa no AC:** a aba Corrida desenha a pista pela posição do seu carro na primeira volta (fica salvo por pista).
 - **Relatório da sessão:** os 3 pontos que mais custaram tempo (curvas, hábitos como rolagem longa ou
   travamentos, e consistência). O coach fala o resumo quando você entra no box depois de algumas voltas.
 - **Histórico:** melhor volta, mediana e consistência de cada sessão no mesmo carro + pista, recorde pessoal,
@@ -101,4 +116,6 @@ O normal é ~60 Hz de leitura e ~20 fps de painel. Mande essas linhas se algo es
 - O equilíbrio é uma **estimativa** pelos ângulos de deriva; use como tendência, não como verdade absoluta.
 - No ACC, o jogo não fornece temperatura interna/meio/externa, então as dicas de camber só aparecem no AC.
 - O brake bias mostrado no ACC é o valor bruto da telemetria (pode diferir alguns % do que aparece no jogo, varia por carro).
-- AC EVO: não testado. Se ele expuser a mesma shared memory do AC, `--sim ac` deve funcionar.
+- AC EVO: lido pela shared memory própria do EVO (`Localcevo_pmf_*`), detectado pelo processo `AssettoCorsaEVO.exe`.
+  O formato vem da documentação da comunidade (não oficial) e o EVO não informa desgaste de pneu nem clima.
+  Se não conectar, abra com `--sim evo` e mande o `dados/log.txt`.

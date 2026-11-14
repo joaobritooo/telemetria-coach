@@ -110,6 +110,13 @@ button.mini.selB{border-color:var(--blue);color:var(--blue);background:rgba(79,1
 .cinfo .mid b{font-size:20px}
 .pbar{display:inline-block;width:46px;height:8px;background:var(--line);border-radius:4px;overflow:hidden}
 .pbar i{display:block;height:100%}
+.vplayer{position:relative;width:100%;aspect-ratio:16/9;background:#000;border-radius:8px;overflow:hidden}
+.vplayer iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
+.vitem{display:flex;gap:10px;padding:6px;border-radius:8px;cursor:pointer;align-items:center}
+.vitem:hover{background:var(--panel2)} .vitem.on{background:rgba(79,166,255,.14);outline:1px solid var(--blue)}
+.vitem img{width:128px;height:72px;object-fit:cover;border-radius:6px;flex:none;background:var(--panel2)}
+.vitem b{font-size:14px;font-weight:600}
+.chip.on{outline:2px solid var(--blue)}
 @media (max-width:1100px){html,body{overflow:auto}.app{height:auto}main,header,.view{grid-template-columns:1fr}}
 </style>
 </head>
@@ -274,12 +281,29 @@ button.mini.selB{border-color:var(--blue);color:var(--blue);background:rgba(79,1
         </div>
       </div>
     </div>
+    <div class="view" id="viewV" hidden>
+      <div class="col">
+        <div class="card" style="padding:8px">
+          <div class="vplayer" id="vPlayer"><div class="sub" style="padding:40px;text-align:center">Escolha uma aula na lista ao lado.<br><br>
+            Os vídeos são de canais de coaching (Driver61, Coach Dave Academy, escola do iRacing) e alguns em português.</div></div>
+        </div>
+        <div class="card grow"><div id="vInfo" class="scroll"></div></div>
+      </div>
+      <div class="col">
+        <div class="card grow">
+          <div class="label"><span>Aulas de pilotagem</span><span id="recHint" style="text-transform:none;letter-spacing:0"></span></div>
+          <div class="chips" id="vFilters" style="margin:0 0 8px"></div>
+          <div class="scroll" id="vList"></div>
+        </div>
+      </div>
+    </div>
   </main>
 
   <footer>
     <button class="tab active" id="tabA">📈 Análise</button>
     <button class="tab" id="tabR">🏁 Corrida</button>
     <button class="tab" id="tabE">📊 Evolução</button>
+    <button class="tab" id="tabV">🎓 Aulas</button>
     <span style="width:12px"></span>
     <button id="btnVoice">🔈 Voz desligada</button>
     <button id="btnBeep">🔕 Bipes de frenagem</button>
@@ -306,6 +330,15 @@ button.mini.selB{border-color:var(--blue);color:var(--blue);background:rgba(79,1
     <li><b>Lift &amp; coast (economia):</b> tirar o pé antes do ponto de frenagem no fim das retas, rolar e frear, mantendo a mesma velocidade de ápice. O coach só sugere quando o combustível não fecha até o fim.
       <br><a href="https://coachdaveacademy.com/tutorials/mastering-lift-and-coast-how-to-save-fuel-without-sacrificing-speed/" target="_blank">Coach Dave Academy — Mastering Lift and Coast</a> ·
       <a href="https://racer.com/racerpedia/racing-101/how-does-fuel-saving-work" target="_blank">RACER — How does fuel saving work?</a></li>
+    <li><b>Taxa de soltura do freio:</b> o que define a velocidade na curva é o momento e a <i>velocidade</i> com que você solta o freio; quanto mais lenta e fechada a curva, mais trail braking. O coach compara quanto tempo você leva para soltar o pedal com a sua melhor volta.
+      <br><a href="https://speedsecrets.com/wp-content/uploads/2021/10/RossBentley-Trail-Braking-20210928-1.pdf" target="_blank">Ross Bentley (Speed Secrets) — Trail Braking</a></li>
+    <li><b>O volante consome velocidade:</b> quanto mais você esterça, mais o pneu esfrega; abrir o volante cedo libera o carro para acelerar. O coach conta correções de volante no meio da curva e compara o volante no ápice.
+      <br><a href="https://rossbentley.substack.com/p/speed-secrets-time-to-unwind" target="_blank">Ross Bentley — Time to Unwind</a></li>
+    <li><b>Círculo de aderência:</b> o pneu tem um "orçamento" de aderência para frear, virar e acelerar. Pilotos rápidos andam na borda do círculo na transição freio → curva; iniciantes freiam, soltam e só depois viram. O coach mede a aderência combinada (G lateral + longitudinal) entre a frenagem e o ápice.
+      <br><a href="https://www.hpacademy.com/courses/data-analysis-fundamentals/the-data-analysis-tool-box-traction-circle/" target="_blank">HP Academy — Traction circle</a> ·
+      <a href="https://virtualracingschool.com/academy/iracing-career-guide/second-season/braking-technique/" target="_blank">Virtual Racing School — Braking technique</a></li>
+    <li><b>Ponto de velocidade mínima e acelerador total:</b> a velocidade mínima é o melhor resumo de como você fez a curva; mínima adiantada = virou cedo, atrasada = freio longe demais e acelerador atrasado. Quem chega primeiro (e fica) no acelerador 100% ganha a reta.
+      <br><a href="https://coachdaveacademy.com/tutorials/a-delta-guide-how-to-use-throttle-traces-to-improve/" target="_blank">Coach Dave Academy — Throttle traces</a></li>
   </ul>
   <p class="sub">Os limites numéricos (folga de rolagem, margens de combustível) ficam em <code>CFG</code> no topo de analysis.py.</p>
   <button onclick="document.getElementById('modal').style.display='none'">Fechar</button>
@@ -358,11 +391,13 @@ function brakeCue(n){
 $('btnSrc').onclick = () => { $('modal').style.display = 'flex'; };
 let view = 'A', userPickedView = false;
 function setView(v, byUser){ view = v; if (byUser) userPickedView = true;
-  ['A', 'R', 'E'].forEach(k => { $('view' + k).hidden = v !== k; $('tab' + k).classList.toggle('active', v === k); });
+  if (v === 'V') renderAulas();
+  ['A', 'R', 'E', 'V'].forEach(k => { $('view' + k).hidden = v !== k; $('tab' + k).classList.toggle('active', v === k); });
   if (v === 'E') { loadHistory(); loadCompare(); cmpDirty = true; } }
 $('tabA').onclick = () => setView('A', true);
 $('tabR').onclick = () => setView('R', true);
 $('tabE').onclick = () => setView('E', true);
+$('tabV').onclick = () => setView('V', true);
 
 const fmtGap = g => g == null ? '–' : (g > 0 ? '+' : g < 0 ? '−' : '') + Math.abs(g).toFixed(1);
 function duelBox(d, label, ahead){
@@ -509,6 +544,7 @@ function render(s){
   if (s.ref_version !== refVersion) { refVersion = s.ref_version; fetch('/api/ref').then(r => r.json()).then(r => { ref = r; }); }
   renderFeed(s.messages || []);
   renderReport(s.report);
+  aulasTick();
   if (view === 'E' && s.n_traces !== lastTraces) { lastTraces = s.n_traces; loadCompare(); if (Date.now() - histAt > 20000) loadHistory(); }
   try { renderRace(s); } catch(e) { console.error(e); }
   if (!s.live) return;
@@ -621,7 +657,7 @@ function drawMap(){
   const pts = mapPts.filter(p => p);
   const cars = r.cars_xy || [];
   const all = pts.length > 20 ? pts : pts.concat(cars.map(c => [c.x, c.y]));
-  if (!all.length) { ctx.fillStyle = css('--muted'); ctx.font = '13px Segoe UI'; ctx.fillText(r.available ? 'O mapa se monta sozinho conforme os carros andam.' : (r.status || ''), 10, 24); return; }
+  if (!all.length) { ctx.fillStyle = css('--muted'); ctx.font = '13px Segoe UI'; ctx.fillText(r.own_map ? 'O desenho da pista se monta sozinho na sua primeira volta (fica salvo para a próxima vez).' : r.available ? 'O mapa se monta sozinho conforme os carros andam.' : (r.status || ''), 10, 24); return; }
   let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
   all.forEach(([x, y]) => { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); });
   const pad = 16, k = Math.min((W - 2*pad) / Math.max(1, x1 - x0), (H - 2*pad) / Math.max(1, y1 - y0));
@@ -646,7 +682,7 @@ function drawMap(){
     ctx.globalAlpha = 1;
   });
   ctx.textAlign = 'start';
-  $('mapInfo').textContent = pts.length < mapPts.length * 0.9 ? `montando traçado… ${Math.round(pts.length / Math.max(1, mapPts.length) * 100)}%` : '';
+  $('mapInfo').textContent = pts.length < mapPts.length * 0.9 ? `${r.own_map ? 'desenhando pela sua volta' : 'montando traçado'}… ${Math.round(pts.length / Math.max(1, mapPts.length) * 100)}%` : '';
 }
 
 // ---------------------------------------------------------------- clima e desgaste (aba Corrida)
@@ -705,7 +741,9 @@ window.pick = pick;
 function renderCompare(){
   const c = cmp; if (!c) return;
   const A = c.a, B = c.b;
-  $('cmpTitle').innerHTML = `<span style="color:var(--violet)">A: ${A ? A.label : '—'}</span> &nbsp;·&nbsp; <span style="color:var(--blue)">B: ${B ? B.label : '—'}</span>`;
+  const est = [A, B].some(l => l && l.xy_est);
+  $('cmpTitle').innerHTML = `<span style="color:var(--violet)">A: ${A ? A.label : '—'}</span> &nbsp;·&nbsp; <span style="color:var(--blue)">B: ${B ? B.label : '—'}</span>` +
+    (est ? ' <span class="sub">· traçado aproximado em volta sem posição gravada</span>' : '');
   const tot = c.delta && c.delta.length ? c.delta[c.delta.length - 1] : null;
   $('cmpTot').innerHTML = tot == null ? '<span class="sub" style="font-size:13px">complete uma volta para comparar</span>' : `B ${tot > 0 ? '+' : '−'}${Math.abs(tot).toFixed(3)}s`;
   $('cmpTot').style.color = tot > 0 ? css('--red') : css('--green');
@@ -901,6 +939,80 @@ function renderHistory(){
     `<tr><td><b>T${c.id}</b></td><td class="mono">${(c.first / 1000).toFixed(2)}s</td><td class="mono">${(c.last / 1000).toFixed(2)}s</td><td class="mono">${(c.best / 1000).toFixed(2)}s</td>
      <td class="mono ${c.delta < -0.02 ? 'good' : c.delta > 0.02 ? 'bad' : ''}">${c.delta > 0 ? '+' : ''}${c.delta.toFixed(2)}s</td></tr>`).join('')
     : '<tr><td class="sub">A evolução por curva aparece a partir da 2ª sessão neste carro + pista.</td></tr>';
+}
+
+// ---------------------------------------------------------------- aulas em vídeo
+const TOPICS = {fund: 'Fundamentos', linha: 'Traçado', freio: 'Frenagem', acel: 'Acelerador e saída', equil: 'Sai de frente / traseira', chuva: 'Chuva', acc: 'ACC'};
+const VIDEOS = [
+  {v: 'ycHr7MH0Gvw', t: 'Fundamentos para pilotar um GT3 rápido e suave', ch: 'Coach Dave Academy (canal oficial do Assetto Corsa)', topic: 'fund', lang: 'EN',
+   d: 'A base de tudo: suavidade nos pedais e no volante, olhar à frente e deixar o carro trabalhar.'},
+  {v: '8xNnWmrXVFk', t: 'Como ser mais rápido no simulador — análise de volta ao vivo', ch: 'Driver61', topic: 'fund', lang: 'EN',
+   d: 'Trail braking, traçado e acelerador analisados com telemetria — o mesmo tipo de comparação da aba Evolução.'},
+  {v: 'LxMSdvnm0Ms', t: 'Escola de pilotagem — fundamentos do traçado e das curvas (parte A)', ch: 'iRacing', topic: 'linha', lang: 'EN',
+   d: 'Ponto de entrada, ápice e saída; por que a linha mais aberta carrega mais velocidade.'},
+  {v: 'ZTSpf6utKto', t: 'Escola de pilotagem — fundamentos do traçado e das curvas (parte B)', ch: 'iRacing', topic: 'linha', lang: 'EN',
+   d: 'Continuação: tipos de curva, sequências e prioridades.'},
+  {v: 'aZlOkt1oU2k', t: 'O traçado: como fazer a curva perfeita', ch: 'Driver61', topic: 'linha', lang: 'EN',
+   d: 'Passo a passo da linha ideal numa curva isolada.'},
+  {v: 'p94CyIDFNBo', t: 'Como pilotar curvas lentas, médias e rápidas', ch: 'Driver61', topic: 'linha', lang: 'EN',
+   d: 'A reta depois da curva vale mais que a curva: priorize a saída antes de reta longa.'},
+  {v: '7-emVgnvUHE', t: 'Dicas de Pilotagem #1: traçado com uma regra e uma exceção', ch: 'Pista & Pilotagem', topic: 'linha', lang: 'PT',
+   d: 'Em português: uma regra simples para achar o melhor traçado.'},
+  {v: 'jb8b8DG_rDI', t: 'Pilotagem — seu traçado nas curvas', ch: 'KART F1', topic: 'linha', lang: 'PT',
+   d: 'Em português: traçado esportivo vs. traçado do dia a dia (kart, mas vale para qualquer carro).'},
+  {v: 'sZG1P5hS5u4', t: 'Está freando cedo? Ache muito tempo na frenagem', ch: 'Driver61', topic: 'freio', lang: 'EN',
+   d: 'Como achar o ponto de frenagem certo e frear forte no início. Use junto com os bipes de frenagem do app.'},
+  {v: 'eUdaWbr1KB4', t: 'Trail braking: 5 erros que destroem sua volta', ch: 'Driver61', topic: 'freio', lang: 'EN',
+   d: 'Soltar o freio de uma vez, soltar cedo demais… é o que o coach aponta como "soltou o freio de uma vez".'},
+  {v: '9nVjqlWUal0', t: '5 motivos para usar trail braking no sim racing', ch: 'Driver61', topic: 'freio', lang: 'EN',
+   d: 'Por que manter um pouco de freio enquanto vira ajuda o carro a girar.'},
+  {v: 'tvcuGoVhpxw', t: 'Como fazer trail braking: guia passo a passo', ch: 'Driver61', topic: 'freio', lang: 'EN',
+   d: 'Exercício progressivo para treinar a soltura gradual do pedal.'},
+  {v: 'YQV3zZuCtkw', t: 'Você está usando o acelerador errado?', ch: 'Driver61', topic: 'acel', lang: 'EN',
+   d: 'Retomada progressiva, acelerador de equilíbrio no meio da curva e chegar cedo ao 100%.'},
+  {v: 'Jz0v9A1UP7Q', t: 'Subesterço explicado: o que é e como controlar', ch: 'Driver61', topic: 'equil', lang: 'EN',
+   d: 'Quando o carro sai de frente: causas na pilotagem (entrada rápida, volante demais) e como corrigir.'},
+  {v: 'RvHErTheI9w', t: 'Sobresterço explicado', ch: 'Driver61', topic: 'equil', lang: 'EN',
+   d: 'Quando a traseira escapa: soltura do freio, acelerador brusco e transferência de peso.'},
+  {v: 'oKWd-hgyoLM', t: 'Dicas de Pilotagem #4: o traçado ideal na chuva', ch: 'Pista & Pilotagem', topic: 'chuva', lang: 'PT',
+   d: 'Em português: por onde andar na pista molhada, com pneu de chuva ou slick.'},
+  {v: '1abQtzIJKnI', t: 'ACC: tutorial de trail braking com telemetria (Suzuka)', ch: 'Zermatt', topic: 'acc', lang: 'EN',
+   d: 'Trail braking no GT3 do ACC lido na telemetria MoTeC.'},
+  {v: 'AIpIgUqiF-8', t: 'Como frear melhor no Assetto Corsa Competizione', ch: 'OverTake.gg (com Jardier)', topic: 'acc', lang: 'EN',
+   d: 'Frenagem específica do ACC, com piloto convidado.'},
+  {v: 'R7G3eHFf7tc', t: 'Como ficar melhor no Assetto Corsa Competizione', ch: 'Track Titan', topic: 'acc', lang: 'EN',
+   d: 'Trail braking, técnicas de acelerador e como resolver sub e sobresterço no ACC.'},
+];
+let vFilter = 'all', vCur = null, vRecSig = '';
+function renderAulas(){
+  const chips = [['all', 'Todos'], ['rec', '⭐ Para você'], ...Object.entries(TOPICS), ['PT', '🇧🇷 Em português']];
+  $('vFilters').innerHTML = chips.map(([k, l]) => `<button class="chip ${vFilter === k ? 'on' : ''}" onclick="vSetFilter('${k}')">${l}</button>`).join('');
+  const rec = recTopics();
+  const list = VIDEOS.filter(x => vFilter === 'all' || x.topic === vFilter || (vFilter === 'PT' && x.lang === 'PT') || (vFilter === 'rec' && rec.includes(x.topic)));
+  $('vList').innerHTML = list.length ? list.map(x => `<div class="vitem ${vCur === x.v ? 'on' : ''}" onclick="vPlay('${x.v}')">
+      <img src="https://i.ytimg.com/vi/${x.v}/mqdefault.jpg" alt="">
+      <div><b>${x.t}</b><div class="sub">${TOPICS[x.topic]}${x.ch ? ' · ' + x.ch : ''} · ${x.lang === 'PT' ? '🇧🇷 português' : 'inglês'}</div></div></div>`).join('')
+    : '<div class="sub">Nenhuma recomendação ainda: complete algumas voltas e o relatório da sessão indica os temas.</div>';
+}
+function recTopics(){
+  const rep = (state && state.report) || [];
+  return [...new Set(rep.map(r => r.topic).filter(Boolean))];
+}
+window.vSetFilter = k => { vFilter = k; renderAulas(); };
+window.vPlay = v => {
+  const x = VIDEOS.find(y => y.v === v); if (!x) return;
+  vCur = v;
+  $('vPlayer').innerHTML = `<iframe src="https://www.youtube-nocookie.com/embed/${v}?rel=0&cc_load_policy=1&hl=pt-BR&cc_lang_pref=pt" title="${x.t}"
+    allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture; fullscreen" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>`;
+  $('vInfo').innerHTML = `<b style="font-size:17px">${x.t}</b><div class="sub">${x.ch || 'YouTube'} · ${TOPICS[x.topic]}</div><p>${x.d}</p>
+    <button onclick="fetch('/api/open',{method:'POST',body:JSON.stringify({v:'${v}'})})">↗ Abrir no YouTube</button>
+    ${x.lang === 'EN' ? '<span class="sub" style="margin-left:8px">Em inglês: ⚙ → Legendas → Traduzir automaticamente → Português</span>' : ''}`;
+  renderAulas();
+};
+function aulasTick(){
+  const sig = recTopics().join(',');
+  if (sig !== vRecSig) { vRecSig = sig; if (view === 'V') renderAulas();
+    $('recHint').innerHTML = sig ? 'Recomendado pelo seu relatório: ' + recTopics().map(t => `<b>${TOPICS[t]}</b>`).join(', ') : ''; }
 }
 
 function loop(){

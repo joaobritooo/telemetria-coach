@@ -375,6 +375,10 @@ def load_config():
         cfg["abrir_junto"] = [p for p in SIMHUB_CANDIDATES if os.path.isfile(p)][:1]
         cfg["_ajuda"] = "Programas abertos junto com o Telemetria Coach (se ainda não estiverem abertos). Deixe [] para nenhum."
         changed = True
+    if "simhub_trocar_jogo" not in cfg:
+        cfg["simhub_trocar_jogo"] = True
+        cfg["_ajuda_simhub"] = "Troca o jogo selecionado no SimHub sozinho quando você abre ACC, AC, AC EVO ou AC Rally."
+        changed = True
     if "espelhar_mapa" not in cfg:
         cfg["espelhar_mapa"] = False
         cfg["_ajuda_mapa"] = "Se o mapa aparecer espelhado (pista ao contrário) e o spotter trocar esquerda/direita, mude para true."
@@ -404,6 +408,65 @@ def launch_companions():
         # ShellExecute: funciona também se o programa pedir permissão de administrador
         r = ctypes.windll.shell32.ShellExecuteW(None, "open", exe, None, os.path.dirname(exe), 7)  # 7 = minimizado
         print(f"abrindo {exe}: {'ok' if r > 32 else 'falhou (' + str(r) + ')'}", flush=True)
+
+
+# processo do jogo -> código do jogo no SimHub (SimHubWPF.exe -switchgame <código>)
+SIMHUB_GAMES = [
+    ({"assettocorsaevo.exe"}, "AssettoCorsaEVO", "AC EVO"),
+    ({"ac2-win64-shipping.exe"}, "AssettoCorsaCompetizione", "ACC"),
+    ({"acs.exe", "acs_x86.exe"}, "AssettoCorsa", "Assetto Corsa"),
+    ({"acr.exe", "acr-win64-shipping.exe"}, "AssettoCorsaRally", "AC Rally"),
+]
+
+
+def simhub_exe(running_path=None):
+    for p in [running_path] + [x for x in load_config().get("abrir_junto", []) if x.lower().endswith("simhubwpf.exe")] + SIMHUB_CANDIDATES:
+        if p and os.path.isfile(p):
+            return p
+    return None
+
+
+def simhub_current_game(exe):
+    """Último jogo carregado pelo SimHub, lido do log dele ("(Re)Starting X Game Manager")."""
+    try:
+        with open(os.path.join(os.path.dirname(exe), "Logs", "SimHub.txt"), "rb") as fh:
+            fh.seek(0, 2)
+            fh.seek(max(0, fh.tell() - 200_000))
+            tail = fh.read().decode("utf-8", "ignore")
+        import re
+        found = re.findall(r"\(Re\)Starting (\w+) Game Manager", tail)
+        return found[-1] if found else None
+    except OSError:
+        return None
+
+
+def simhub_switcher():
+    """Quando você abre um dos jogos, troca o jogo selecionado no SimHub (se ele estiver aberto)."""
+    from sources import running_processes
+    done = None
+    while True:
+        time.sleep(3)
+        try:
+            if not load_config().get("simhub_trocar_jogo", True):
+                continue
+            procs = running_processes()
+            game = next(((code, name) for exes, code, name in SIMHUB_GAMES if procs & exes), None)
+            if game is None:
+                done = None
+                continue
+            if game[0] == done or "simhubwpf.exe" not in procs:
+                continue
+            exe = simhub_exe()
+            if not exe:
+                continue
+            if simhub_current_game(exe) == game[0]:
+                done = game[0]
+                continue
+            r = ctypes.windll.shell32.ShellExecuteW(None, "open", exe, f"-switchgame {game[0]}", os.path.dirname(exe), 7)
+            print(f"SimHub: trocando para {game[1]} ({game[0]}): {'ok' if r > 32 else 'falhou (' + str(r) + ')'}", flush=True)
+            done = game[0]
+        except Exception as e:
+            print("SimHub: erro ao trocar o jogo:", repr(e), flush=True)
 
 
 def setup_logging():
@@ -453,6 +516,7 @@ def main():
     threading.Thread(target=keep_boosted, daemon=True).start()
     if not args.no_companions and not args.demo and sys.platform == "win32":
         threading.Thread(target=launch_companions, daemon=True).start()
+        threading.Thread(target=simhub_switcher, daemon=True).start()
     try:
         server = ExclusiveServer(("127.0.0.1", args.port), Handler)
     except OSError:

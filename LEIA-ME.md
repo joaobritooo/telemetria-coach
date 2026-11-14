@@ -100,6 +100,12 @@ Legendas → Traduzir automaticamente → Português.
 - **Histórico:** melhor volta, mediana e consistência de cada sessão no mesmo carro + pista, recorde pessoal,
   quanto você já evoluiu e a evolução do tempo em cada curva entre a primeira e a última sessão.
 
+## SimHub (iFlag)
+
+O app abre o SimHub junto (lista `abrir_junto` em `dados/config.json`) e **troca o jogo selecionado no SimHub
+sozinho** quando você abre ACC, AC, AC EVO ou AC Rally (comando `SimHubWPF.exe -switchgame`). Se o SimHub já
+estiver no jogo certo, não faz nada. Para desligar: `"simhub_trocar_jogo": false` em `dados/config.json`.
+
 ## Ajustes
 
 Os limites (pressão alvo, janelas de temperatura, sensibilidade de travamento etc.) ficam no topo de
